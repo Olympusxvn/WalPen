@@ -1,0 +1,13 @@
+.env
+.env.*
+data/
+server/
+scripts/
+tests/
+reference-pause-and-pen/
+docs/
+*.md
+test-results/
+playwright-report/
+.git/
+node_modules/
