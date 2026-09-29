@@ -1,0 +1,6 @@
+WalPen also builds on two earlier contributions to MemWal’s core memory workflow:
+
+- **#591 → PR #885:** The discussion distinguished asynchronous write timing from deletion-related recall behavior. PR #885 addresses the narrower server-side issue of excluding memories claimed for deletion from recall. WalPen additionally checks active revisions and consent before using recalled content.
+- **#592 → PR #605:** The token-budgeting request led to SDK functionality that WalPen now uses to limit approved memory context to 768 estimated tokens and five sources, while preserving complete excerpts.
+
+These issues originated in Session 7 and are included here as prior contributions adopted in WalPen, rather than new Session 8 reports. Our new Session 8 feedback is documented in #1047, #1048 and #1049.
