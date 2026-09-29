@@ -18,7 +18,7 @@ $tunnelUrl = $null
 for ($attempt=0; $attempt -lt 30; $attempt++) {
   Start-Sleep -Seconds 1
   if (Test-Path -LiteralPath 'data/tunnel-error.log') {
-    $match = [regex]::Match([IO.File]::ReadAllText((Join-Path $projectDir 'data/tunnel-error.log')), 'https://[a-z0-9-]+\.trycloudflare\.com')
+    $match = [regex]::Match((Get-Content -LiteralPath 'data/tunnel-error.log' -Raw), 'https://[a-z0-9-]+\.trycloudflare\.com')
     if ($match.Success) { $tunnelUrl=$match.Value; break }
   }
 }
@@ -29,5 +29,5 @@ $apiRule.destination = "$tunnelUrl/api/:path*"
 $config | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath 'vercel.json' -Encoding utf8
 Write-Output "Backend tunnel: $tunnelUrl"
 Write-Output 'Keep this machine and Ollama running. Private configuration remains in .env.'
-if ($Deploy) { npm exec --yes --package vercel -- vercel --prod --yes }
-else { Write-Output 'Run npm exec --yes --package vercel -- vercel --prod --yes to update the API destination on Vercel.' }
+if ($Deploy) { npm exec --yes --package vercel -- vercel --prod --yes --scope olympusxvns-projects }
+else { Write-Output 'Run npm exec --yes --package vercel -- vercel --prod --yes --scope olympusxvns-projects to update the API destination on Vercel.' }

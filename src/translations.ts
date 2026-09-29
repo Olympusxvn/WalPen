@@ -226,6 +226,10 @@ export const english: Record<string, string> = {
   "Không tìm thấy API.": "API endpoint not found.",
   "Yêu cầu không thực hiện được. Vui lòng thử lại.":
     "The request couldn't be completed. Please try again.",
+  "Ký ức đã thay đổi khi đang trả lời. Hãy gửi lại câu hỏi để dùng thông tin hiện tại.":
+    "Your memories changed while the answer was being generated. Send your question again to use the current information.",
+  "Một số ký ức không được đưa vào câu trả lời để giữ ngữ cảnh vừa đủ. Nội dung đã lưu vẫn nguyên vẹn.":
+    "Some memories were left out to keep the context manageable. Your saved content is unchanged.",
   "Model chưa trả lời. Thử lại sau.":
     "The model hasn't returned an answer. Try again shortly.",
   "Tiến trình trước đã dừng trong khi gửi. Hãy đối soát trước khi thử lại.":

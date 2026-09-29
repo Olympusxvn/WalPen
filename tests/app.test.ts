@@ -39,7 +39,7 @@ function setup() {
   const model = {
     configured: true,
     name: "test-only",
-    async answer(_m: string, _h: any, s: Source[]) {
+    async answer(_m: string, _h: any, s: Source[]): Promise<string> {
       received = s;
       return s.length ? "Có ký ức [1]" : "Chưa có ký ức liên quan.";
     },
@@ -249,3 +249,120 @@ test("unknown or tampered blobs cannot become model memory", async () => {
   assert.equal(s.received().length, 0);
   s.store.db.close();
 });
+
+test("consent and stale-revision filtering happen before budgeting approved excerpts", async () => {
+  const s = setup();
+  const a = request.agent(s.app);
+  await a.post("/api/register").send(account("budget_user")).expect(201);
+  const old = await a
+    .post("/api/entries")
+    .send(entry({ memory: "retired ".repeat(220) }))
+    .expect(202);
+  await tick();
+  await a.post(`/api/entries/${old.body.entry.id}/forget`).send({}).expect(200);
+  for (let i = 0; i < 4; i++)
+    await a
+      .post("/api/entries")
+      .send(
+        entry({
+          body: "PRIVATE ".repeat(1400),
+          memory: `approved ${i} ` + "x".repeat(1800),
+        }),
+      )
+      .expect(202);
+  await tick();
+  const response = await a
+    .post("/api/chat")
+    .send({ message: "Recall" })
+    .expect(200);
+  assert.equal(response.body.memoryBudget.truncated, true);
+  assert.ok(
+    response.body.memoryBudget.tokenEstimate <=
+      response.body.memoryBudget.maxTokens,
+  );
+  assert.ok(s.received().length > 0 && s.received().length < 4);
+  assert.ok(s.received().every((source) => source.text.startsWith("approved")));
+  assert.ok(!JSON.stringify(s.received()).includes("PRIVATE"));
+  assert.equal(s.received()[0].text, "approved 0 " + "x".repeat(1800));
+  s.store.db.close();
+});
+
+test("a known blob with a changed unapproved excerpt is rejected", async () => {
+  const s = setup();
+  const a = request.agent(s.app);
+  await a.post("/api/register").send(account("tampered_user")).expect(201);
+  const saved = await a.post("/api/entries").send(entry()).expect(202);
+  await tick();
+  s.memory.recall = async () => [
+    {
+      blob_id: `blob-${saved.body.entry.id}`,
+      text: JSON.stringify({
+        schema: "walpen/v1",
+        id: saved.body.entry.id,
+        consent: true,
+        memory: "Not approved by this user",
+      }),
+    },
+  ];
+  const response = await a
+    .post("/api/chat")
+    .send({ message: "Recall" })
+    .expect(200);
+  assert.equal(response.body.sources.length, 0);
+  assert.equal(s.received().length, 0);
+  s.store.db.close();
+});
+
+for (const operation of ["forget", "edit"] as const) {
+  test(`${operation} while generation is pending suppresses the obsolete answer`, async () => {
+    const s = setup();
+    const a = request.agent(s.app);
+    await a
+      .post("/api/register")
+      .send(account(`race_${operation}`))
+      .expect(201);
+    const saved = await a.post("/api/entries").send(entry()).expect(202);
+    await tick();
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    s.model.answer = async (_m, _h, sources) => {
+      assert.equal(sources.length, 1);
+      entered();
+      await held;
+      return "obsolete answer [1]";
+    };
+    const pending = a
+      .post("/api/chat")
+      .send({ message: "Recall" })
+      .then((response) => response);
+    await started;
+    if (operation === "forget")
+      await a
+        .post(`/api/entries/${saved.body.entry.id}/forget`)
+        .send({})
+        .expect(200);
+    else
+      await a
+        .post("/api/entries")
+        .send(
+          entry({
+            supersedes: saved.body.entry.id,
+            memory: "New approved fact",
+          }),
+        )
+        .expect(202);
+    release();
+    const response = await pending;
+    assert.equal(response.status, 409);
+    assert.equal(response.body.answer, undefined);
+    assert.equal(response.body.sources, undefined);
+    assert.match(response.body.error, /Ký ức đã thay đổi/);
+    await tick();
+    s.store.db.close();
+  });
+}

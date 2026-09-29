@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Store, hash, type Entry } from "./store.ts";
 import type { MemoryGateway } from "./memory.ts";
 import type { ChatModel, Source } from "./llm.ts";
+import { budgetMemoryContext } from "./memory-context.ts";
 const derive = promisify(scrypt);
 const accountSchema = z.object({
   username: z
@@ -142,12 +143,10 @@ export function createApp(
   app.post("/api/register", authLimiter, async (req, res) => {
     const parsed = accountSchema.safeParse(req.body);
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          error:
-            "Tên tài khoản: 3–40 ký tự a-z, số, dấu . _ -. Mật khẩu ít nhất 10 ký tự.",
-        });
+      return res.status(400).json({
+        error:
+          "Tên tài khoản: 3–40 ký tự a-z, số, dấu . _ -. Mật khẩu ít nhất 10 ký tự.",
+      });
     const { username, password, inviteCode } = parsed.data;
     if (options.inviteCode && inviteCode !== options.inviteCode)
       return res.status(403).json({ error: "Mã mời chưa đúng." });
@@ -308,12 +307,10 @@ export function createApp(
           return res.json({ entry: safe(store.get(e.id, e.userId)!) });
         }
       } catch {}
-      return res
-        .status(409)
-        .json({
-          error:
-            "Chưa tìm thấy bản ghi khi đối soát. Dữ liệu cục bộ vẫn được giữ; ứng dụng chưa gửi lại để tránh tạo bản sao.",
-        });
+      return res.status(409).json({
+        error:
+          "Chưa tìm thấy bản ghi khi đối soát. Dữ liệu cục bộ vẫn được giữ; ứng dụng chưa gửi lại để tránh tạo bản sao.",
+      });
     }
     if (e.status !== "synced") void sync(e);
     res.json({ entry: safe(e) });
@@ -367,11 +364,9 @@ export function createApp(
     if (!parsed.success)
       return res.status(400).json({ error: "Tin nhắn chưa hợp lệ." });
     if (!model.configured)
-      return res
-        .status(503)
-        .json({
-          error: "Ollama chưa được cấu hình. Nhật ký của bạn vẫn dùng được.",
-        });
+      return res.status(503).json({
+        error: "Ollama chưa được cấu hình. Nhật ký của bạn vẫn dùng được.",
+      });
     const { message, history, useMemory } = parsed.data;
     let sources: Source[] = [];
     if (useMemory && memory.configured) {
@@ -394,28 +389,28 @@ export function createApp(
             record.schema !== "walpen/v1" ||
             record.id !== e.id ||
             record.consent !== true ||
-            typeof record.memory !== "string"
+            typeof record.memory !== "string" ||
+            record.memory !== e.memory
           )
             continue;
           sources.push({
             id: e.id,
             title: e.title || "Một trang nhật ký",
-            text: record.memory.slice(0, 2000),
+            text: record.memory,
             date: e.occurredAt,
             blobId: r.blob_id,
           });
           seen.add(e.id);
-          if (sources.length === 5) break;
         }
       } catch {
-        return res
-          .status(503)
-          .json({
-            error:
-              "Chưa đọc được ký ức từ Walrus. Thử lại hoặc tắt “Dùng ký ức” để trò chuyện không có bộ nhớ.",
-          });
+        return res.status(503).json({
+          error:
+            "Chưa đọc được ký ức từ Walrus. Thử lại hoặc tắt “Dùng ký ức” để trò chuyện không có bộ nhớ.",
+        });
       }
     }
+    const context = budgetMemoryContext(sources);
+    sources = context.sources;
     // Do not trust old client-provided history to reintroduce withdrawn memories.
     const safeHistory = history.filter((m) => m.role === "user");
     try {
@@ -425,21 +420,42 @@ export function createApp(
         sources,
         parsed.data.language,
       );
+      // A withdrawal/edit may finish while the LLM is generating. The prompt
+      // cannot be recalled, but the obsolete answer must not be published.
+      if (
+        sources.some((source) => {
+          const current = store.get(source.id, res.locals.user.id);
+          return (
+            !current ||
+            current.retired ||
+            !current.consent ||
+            current.status !== "synced" ||
+            current.blobId !== source.blobId ||
+            current.memory !== source.text
+          );
+        })
+      ) {
+        return res
+          .status(409)
+          .json({
+            error:
+              "Ký ức đã thay đổi khi đang trả lời. Hãy gửi lại câu hỏi để dùng thông tin hiện tại.",
+          });
+      }
       res.json({
         answer,
         sources,
         model: model.name,
         memoryUsed: sources.length > 0,
+        memoryBudget: context.meta,
       });
     } catch (err) {
-      res
-        .status(503)
-        .json({
-          error:
-            err instanceof Error && err.message.startsWith("LLM")
-              ? err.message
-              : "Chưa kết nối được Ollama/model. Hãy khởi động Ollama và tải model trong Settings.",
-        });
+      res.status(503).json({
+        error:
+          err instanceof Error && err.message.startsWith("LLM")
+            ? err.message
+            : "Chưa kết nối được Ollama/model. Hãy khởi động Ollama và tải model trong Settings.",
+      });
     }
   });
   app.get("/api/export", (req, res) => {

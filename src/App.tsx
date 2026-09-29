@@ -52,6 +52,7 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   sources?: Source[];
+  memoryBudget?: { truncated: boolean };
 };
 const nav = [
   { id: "journal", label: "Trang nhật ký", icon: BookOpen },
@@ -325,7 +326,12 @@ export default function App() {
       });
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: r.answer, sources: r.sources },
+        {
+          role: "assistant",
+          content: r.answer,
+          sources: r.sources,
+          memoryBudget: r.memoryBudget,
+        },
       ]);
     } catch (e: any) {
       setError(e.message);
@@ -946,6 +952,13 @@ export default function App() {
                           {m.role === "assistant" ? "WalPen" : t("Bạn")}
                         </span>
                         <p>{m.content}</p>
+                        {m.memoryBudget?.truncated && (
+                          <small>
+                            {t(
+                              "Một số ký ức không được đưa vào câu trả lời để giữ ngữ cảnh vừa đủ. Nội dung đã lưu vẫn nguyên vẹn.",
+                            )}
+                          </small>
+                        )}
                         {!!m.sources?.length && (
                           <div className="source-list">
                             <span className="card-label">

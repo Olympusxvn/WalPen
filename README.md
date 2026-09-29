@@ -39,8 +39,10 @@ npm start
 - Explicit, editable memory consent. Saving a journal uploads the page; only the separately approved memory excerpt can enter chat context.
 - Walrus background jobs with pending, confirmed and ambiguous states. Timeouts with a known job poll that same job. An ambiguous submission is reconciled by ID and never blindly resubmitted.
 - Fresh-session semantic recall from Walrus; source cards include date and blob ID.
+- Memory context uses MemWal's whole-excerpt token budgeting (768 estimated tokens, at most five sources) after consent/revision filtering. This is an approximate memory budget, not an exact total model-context limit.
 - Ollama chat. Unavailable services produce errors, not simulated AI or fake storage success.
 - Withdrawn or superseded entries are excluded from subsequent recall. Withdrawal creates a new stored revision and stops local retrieval immediately.
+- If a selected memory is withdrawn or edited during generation, the obsolete answer is withheld and the user can retry with current context.
 - An explicit memory on/off control for before/after evaluation. Starting a new chat removes the current transcript.
 
 ## Data and privacy
@@ -91,5 +93,7 @@ A Quick Tunnel URL changes after restart. Update the rewrite and redeploy when i
 Real-user testing, the final article's actual-use evidence, a dedicated Sessions wallet and the final competition submission cannot be fabricated. Draft materials are in `docs/`; fill unverified fields only with observed evidence. Check current event rules before submitting.
 
 ## Stack
+
+Details of upstream PR #605/#885 integration and its deployment boundaries are in [the integration notes](docs/MEMWAL-PR-INTEGRATION.md).
 
 React, TypeScript, Vite, Express, Node SQLite, MemWal SDK, Ollama. No analytics, trackers, external fonts or automatic memory extraction.
