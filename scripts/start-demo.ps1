@@ -2,6 +2,10 @@ param([switch]$Deploy)
 $ErrorActionPreference = 'Stop'
 $projectDir = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location -LiteralPath $projectDir
+$deploymentConfig = Get-Content -LiteralPath 'vercel.json' -Raw | ConvertFrom-Json
+if (($deploymentConfig.rewrites | Where-Object source -eq '/api/:path*').destination -eq '/api') {
+  throw 'This checkout uses the cloud API. Do not replace it with a local tunnel. See docs/CLOUD-DEPLOYMENT.md; use npm run start:local for a local review.'
+}
 if (!(Test-Path -LiteralPath '.env')) { throw 'Configure .env first. See README.md.' }
 New-Item -ItemType Directory -Force -Path 'data' | Out-Null
 $nodeExe = (Get-Command node -ErrorAction Stop).Source

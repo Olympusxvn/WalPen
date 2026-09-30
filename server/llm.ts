@@ -17,8 +17,24 @@ export interface ChatModel {
   ): Promise<string>;
 }
 export class LocalModel implements ChatModel {
-  configured = !!process.env.LLM_PROVIDER;
-  name = process.env.LLM_MODEL || "qwen3:4b-instruct-2507-q4_K_M";
+  private config: {
+    provider?: string;
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  };
+  configured: boolean;
+  name: string;
+  constructor(config?: { provider: string; apiKey: string; model: string }) {
+    this.config = config || {
+      provider: process.env.LLM_PROVIDER,
+      apiKey: process.env.LLM_API_KEY,
+      model: process.env.LLM_MODEL,
+      baseUrl: process.env.LLM_BASE_URL,
+    };
+    this.configured = !!this.config.provider;
+    this.name = this.config.model || "qwen3:4b-instruct-2507-q4_K_M";
+  }
   async answer(
     message: string,
     history: { role: "user" | "assistant"; content: string }[],
@@ -35,9 +51,9 @@ export class LocalModel implements ChatModel {
       { role: "user", content: message },
     ];
     let response: Response;
-    if (process.env.LLM_PROVIDER === "ollama") {
+    if (this.config.provider === "ollama") {
       response = await fetch(
-        `${process.env.LLM_BASE_URL || "http://127.0.0.1:11434"}/api/chat`,
+        `${this.config.baseUrl || "http://127.0.0.1:11434"}/api/chat`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -52,17 +68,17 @@ export class LocalModel implements ChatModel {
           signal: AbortSignal.timeout(120000),
         },
       );
-    } else if (process.env.LLM_PROVIDER === "gemini") {
+    } else if (this.config.provider === "gemini") {
       response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${this.name}:generateContent`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-goog-api-key": process.env.LLM_API_KEY || "",
+            "x-goog-api-key": this.config.apiKey || "",
           },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: system }] },
+            systemInstruction: { parts: [{ text: messages[0].content }] },
             contents: messages.slice(1).map((m) => ({
               role: m.role === "assistant" ? "model" : "user",
               parts: [{ text: m.content }],
@@ -73,12 +89,12 @@ export class LocalModel implements ChatModel {
       );
     } else {
       response = await fetch(
-        `${process.env.LLM_BASE_URL || "https://api.openai.com/v1"}/chat/completions`,
+        `${this.config.baseUrl || "https://api.openai.com/v1"}/chat/completions`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.LLM_API_KEY || ""}`,
+            Authorization: `Bearer ${this.config.apiKey || ""}`,
           },
           body: JSON.stringify({
             model: this.name,
@@ -96,7 +112,8 @@ export class LocalModel implements ChatModel {
     const data: any = await response.json();
     if (
       data.done_reason === "length" ||
-      data.choices?.[0]?.finish_reason === "length"
+      data.choices?.[0]?.finish_reason === "length" ||
+      data.candidates?.[0]?.finishReason === "MAX_TOKENS"
     ) {
       throw new Error(
         "LLM chưa hoàn tất câu trả lời. Hãy thử một câu hỏi ngắn hơn.",

@@ -1,5 +1,7 @@
 # WalPen — checklist nộp Walrus Session 8
 
+**Cập nhật yêu cầu ngày 30/09:** theo yêu cầu mới nhất của tác giả, cần bám sát đoạn “What You Need to Do” trên DeepSurge: deploy chatbot thật, nhớ qua các cuộc trò chuyện, cá nhân hóa, và sử dụng thực tế vài ngày **trước khi chốt article**. Đây là điều kiện còn phải chứng minh, không chỉ là phần bổ sung tùy chọn. Năm ngày fixture không đáp ứng điều kiện thời gian sử dụng. Đang chuẩn bị [bản cloud độc lập máy cá nhân](CLOUD-DEPLOYMENT.md); chưa đánh dấu hoàn tất cho đến khi cutover và kiểm tra public thành công. Bảng dưới đây giữ nguyên mốc bằng chứng 29/09 để tránh gán lại kết quả cũ cho runtime mới.
+
 Đối chiếu ngày 29/09/2026. Theo lựa chọn của tác giả, checklist lấy Event Rules làm chuẩn chính. Đây là checklist chuẩn bị; chưa xác nhận hồ sơ đã nộp.
 
 ## Nguồn và thời hạn

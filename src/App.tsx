@@ -1,5 +1,6 @@
 import { t, getLocale, useLanguage } from "./i18n";
 import { useEffect, useRef, useState } from "react";
+import { CloudAISettings, type AICredentials } from "./CloudAISettings";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -139,6 +140,9 @@ function Botanical() {
 }
 export default function App() {
   const [language, setLanguage] = useLanguage();
+  const [aiCredentials, setAiCredentials] = useState<AICredentials | null>(
+    null,
+  );
   const [page, setPage] = useState<Page>("journal"),
     [user, setUser] = useState<User | null>(null),
     [ready, setReady] = useState(false),
@@ -168,6 +172,32 @@ export default function App() {
     [thinking, setThinking] = useState(false),
     [useMemory, setUseMemory] = useState(true);
   const chatEnd = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setAiCredentials(null);
+    if (!user) return;
+    try {
+      const saved = JSON.parse(
+        sessionStorage.getItem("walpen-ai-" + user.id) || "null",
+      );
+      if (
+        saved &&
+        ["gemini", "openai"].includes(saved.provider) &&
+        typeof saved.apiKey === "string" &&
+        typeof saved.model === "string"
+      )
+        setAiCredentials(saved);
+    } catch {}
+  }, [user?.id]);
+  function saveAI(value: AICredentials | null) {
+    setAiCredentials(value);
+    setMessages([]);
+    if (!user) return;
+    try {
+      if (value)
+        sessionStorage.setItem("walpen-ai-" + user.id, JSON.stringify(value));
+      else sessionStorage.removeItem("walpen-ai-" + user.id);
+    } catch {}
+  }
   useEffect(() => {
     api("/session")
       .then((d) => {
@@ -310,6 +340,11 @@ export default function App() {
       setAuth(true);
       return;
     }
+    if (!aiCredentials && !services.llm) {
+      setPage("settings");
+      setError(t("Thêm khóa AI trong Cài đặt để bắt đầu trò chuyện."));
+      return;
+    }
     setInput("");
     setError("");
     setThinking(true);
@@ -323,6 +358,7 @@ export default function App() {
           .map(({ role, content }) => ({ role, content })),
         useMemory,
         language,
+        llm: aiCredentials || undefined,
       });
       setMessages((m) => [
         ...m,
@@ -444,6 +480,7 @@ export default function App() {
                 onClick={async () => {
                   try {
                     await api("/logout", {});
+                    saveAI(null);
                     setUser(null);
                     setEntries([]);
                     setMessages([]);
@@ -852,7 +889,7 @@ export default function App() {
                     <div className="save-divider" />
                     <p className="small">
                       {t(
-                        "Nội dung đi qua backend và relayer trước khi được mã hóa trên Walrus. Ollama xử lý hội thoại trên máy chạy ứng dụng.",
+                        "Nội dung đi qua backend và relayer trước khi được mã hóa trên Walrus. Dịch vụ AI được chọn trong Cài đặt xử lý hội thoại.",
                       )}
                     </p>
                     <button
@@ -909,7 +946,10 @@ export default function App() {
                   </label>
                   <span>
                     <span className="green-dot" />{" "}
-                    {services.model || t("Chưa cấu hình model")}
+                    {aiCredentials?.model ||
+                      (services.llm
+                        ? services.model
+                        : t("Chưa cấu hình model"))}
                   </span>
                 </div>
                 <div className="chat-surface">
@@ -1122,10 +1162,16 @@ export default function App() {
                   </p>
                   <p>
                     {t(
-                      "Chatbot dùng Ollama trên máy chủ chạy WalPen. Chỉ đoạn ký ức được bạn cho phép mới được đưa vào hội thoại. Đây không phải chế độ hoàn toàn offline.",
+                      "Chatbot dùng dịch vụ AI bạn chọn. Chỉ đoạn ký ức được bạn cho phép mới được đưa vào hội thoại. Với API online, tin nhắn và các đoạn đó được gửi đến nhà cung cấp AI.",
                     )}
                   </p>
                 </section>
+                <CloudAISettings
+                  key={user?.id || "guest"}
+                  language={language}
+                  value={aiCredentials}
+                  onSave={saveAI}
+                />
                 <section className="settings-card">
                   <div className="section-heading">
                     <h2>{t("Kết nối")}</h2>
@@ -1141,11 +1187,18 @@ export default function App() {
                   </div>
                   <div className="service-row">
                     <span>
-                      <Sparkles size={18} /> Ollama ·{" "}
-                      {services.model || t("chưa chọn model")}
+                      <Sparkles size={18} /> AI ·{" "}
+                      {aiCredentials?.model ||
+                        (services.llm ? services.model : t("chưa chọn model"))}
                     </span>
-                    <span className={services.llm ? "service-ok" : "muted"}>
-                      {services.llm ? t("Đã cấu hình") : t("Chưa cấu hình")}
+                    <span
+                      className={
+                        aiCredentials || services.llm ? "service-ok" : "muted"
+                      }
+                    >
+                      {aiCredentials || services.llm
+                        ? t("Đã cấu hình")
+                        : t("Chưa cấu hình")}
                     </span>
                   </div>
                   <p className="small muted">
@@ -1177,9 +1230,7 @@ export default function App() {
                       "WalPen lấy cảm hứng từ Pause & Pen. Không streak. Không bảng điểm. Bạn viết, AI chỉ đồng hành.",
                     )}
                   </p>
-                  <span className="muted small">
-                    {t("WalPen v0.1 · Built with Walrus Memory & Ollama")}
-                  </span>
+                  <span className="muted small">WalPen · Walrus Memory</span>
                 </section>
               </div>
             )}

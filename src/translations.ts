@@ -1,4 +1,14 @@
 export const english: Record<string, string> = {
+  "Thêm khóa AI trong Cài đặt để bắt đầu trò chuyện.":
+    "Add your AI key in Settings to start chatting.",
+  "Chưa cấu hình AI. Thêm khóa Gemini hoặc OpenAI trong Cài đặt để trò chuyện.":
+    "AI is not configured. Add a Gemini or OpenAI key in Settings to chat.",
+  "Chưa kết nối được dịch vụ AI. Kiểm tra khóa, model và dịch vụ trong Cài đặt.":
+    "Could not reach the AI service. Check your key, model and provider in Settings.",
+  "Nội dung đi qua backend và relayer trước khi được mã hóa trên Walrus. Dịch vụ AI được chọn trong Cài đặt xử lý hội thoại.":
+    "Content passes through the backend and relayer before encryption on Walrus. The AI service selected in Settings processes conversations.",
+  "Chatbot dùng dịch vụ AI bạn chọn. Chỉ đoạn ký ức được bạn cho phép mới được đưa vào hội thoại. Với API online, tin nhắn và các đoạn đó được gửi đến nhà cung cấp AI.":
+    "The companion uses your chosen AI service. Only approved memory excerpts enter the conversation. With an online API, messages and those excerpts are sent to the AI provider.",
   "LLM chưa hoàn tất câu trả lời. Hãy thử một câu hỏi ngắn hơn.":
     "The model couldn't finish its reply. Please try a shorter question.",
   "Trang nhật ký": "Journal",

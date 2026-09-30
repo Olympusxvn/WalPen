@@ -1,5 +1,7 @@
 # WalPen: A Journaling Chatbot That Remembers Users Between Sessions
 
+> Editorial status, 30 September: draft based on the local/Ollama test deployment. Cloud migration is being prepared. Before publishing, update the runtime description after deployment verification and add evidence from several actual days of use as required by DeepSurge. The dated fixture is not evidence of real adoption.
+
 ![An open journal, a selected memory card and a conversation recalling the same park scene.](assets/walpen-article-cover.png)
 
 *Concept illustration: an approved journal excerpt becomes context for a later conversation. This is not an application screenshot.*

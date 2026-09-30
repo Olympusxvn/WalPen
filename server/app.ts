@@ -4,9 +4,11 @@ import rateLimit from "express-rate-limit";
 import { randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { Store, hash, type Entry } from "./store.ts";
+import { hash, type Entry } from "./store.ts";
+import type { Repository } from "./repository.ts";
 import type { MemoryGateway } from "./memory.ts";
 import type { ChatModel, Source } from "./llm.ts";
+import { LocalModel } from "./llm.ts";
 import { budgetMemoryContext } from "./memory-context.ts";
 const derive = promisify(scrypt);
 const accountSchema = z.object({
@@ -35,7 +37,7 @@ const entrySchema = z
   });
 const cookieName = "walpen_session";
 export function createApp(
-  store: Store,
+  store: Repository,
   memory: MemoryGateway,
   model: ChatModel,
   options: {
@@ -43,11 +45,14 @@ export function createApp(
     production?: boolean;
     rateLimits?: boolean;
     inviteCode?: string;
+    background?: (work: Promise<unknown>) => void;
+    trustProxy?: number | string;
   } = {},
 ) {
   const app = express();
   app.disable("x-powered-by");
-  if (options.production) app.set("trust proxy", "loopback");
+  if (options.production)
+    app.set("trust proxy", options.trustProxy ?? "loopback");
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -100,26 +105,18 @@ export function createApp(
     standardHeaders: "draft-8",
     legacyHeaders: false,
   });
-  function session(req: express.Request) {
+  async function session(req: express.Request) {
     const token = req.headers.cookie
       ?.split(";")
       .map((v) => v.trim())
       .find((v) => v.startsWith(cookieName + "="))
       ?.slice(cookieName.length + 1);
     if (!token) return undefined;
-    return store.db
-      .prepare(
-        "SELECT users.id,users.username FROM sessions JOIN users ON users.id=sessions.userId WHERE sessions.token=? AND sessions.expires>?",
-      )
-      .get(hash(token), Date.now()) as
-      { id: string; username: string } | undefined;
+    return store.session(hash(token), Date.now());
   }
-  function setSession(res: express.Response, id: string) {
+  async function setSession(res: express.Response, id: string) {
     const token = randomBytes(32).toString("hex");
-    store.db.prepare("DELETE FROM sessions WHERE expires<?").run(Date.now());
-    store.db
-      .prepare("INSERT INTO sessions VALUES(?,?,?)")
-      .run(hash(token), id, Date.now() + 30 * 86400000);
+    await store.addSession(hash(token), id, Date.now() + 30 * 86400000);
     res.cookie(cookieName, token, {
       httpOnly: true,
       sameSite: "strict",
@@ -129,13 +126,14 @@ export function createApp(
     });
   }
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
-  app.get("/api/session", (req, res) =>
+  app.get("/api/session", async (req, res) =>
     res.json({
-      user: session(req) || null,
+      user: (await session(req)) || null,
       services: {
         walrus: memory.configured,
         llm: model.configured,
         model: model.name,
+        byok: true,
       },
       inviteRequired: !!options.inviteCode,
     }),
@@ -154,18 +152,21 @@ export function createApp(
     const key = (await derive(password, salt, 64)) as Buffer;
     const id = randomUUID();
     try {
-      store.db
-        .prepare("INSERT INTO users VALUES(?,?,?,?)")
-        .run(
-          id,
-          username,
-          `${salt}:${key.toString("hex")}`,
-          new Date().toISOString(),
-        );
-    } catch {
+      await store.addUser({
+        id,
+        username,
+        password: `${salt}:${key.toString("hex")}`,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      if (
+        error.code !== "23505" &&
+        !String(error.message).includes("UNIQUE constraint failed")
+      )
+        throw error;
       return res.status(409).json({ error: "Tên tài khoản đã được sử dụng." });
     }
-    setSession(res, id);
+    await setSession(res, id);
     res.status(201).json({ user: { id, username } });
   });
   app.post("/api/login", authLimiter, async (req, res) => {
@@ -174,9 +175,7 @@ export function createApp(
       return res
         .status(400)
         .json({ error: "Kiểm tra tên tài khoản và mật khẩu." });
-    const u = store.db
-      .prepare("SELECT * FROM users WHERE username=?")
-      .get(parsed.data.username) as any;
+    const u = await store.userByName(parsed.data.username);
     const [salt, digest] = (
       u?.password || "00000000000000000000000000000000:" + "00".repeat(64)
     ).split(":");
@@ -185,11 +184,11 @@ export function createApp(
       return res
         .status(401)
         .json({ error: "Tên tài khoản hoặc mật khẩu chưa đúng." });
-    setSession(res, u.id);
+    await setSession(res, u.id);
     res.json({ user: { id: u.id, username: u.username } });
   });
-  app.use("/api", (req, res, next) => {
-    const user = session(req);
+  app.use("/api", async (req, res, next) => {
+    const user = await session(req);
     if (!user)
       return res
         .status(401)
@@ -197,14 +196,13 @@ export function createApp(
     res.locals.user = user;
     next();
   });
-  app.post("/api/logout", (req, res) => {
+  app.post("/api/logout", async (req, res) => {
     const token = req.headers.cookie
       ?.split(";")
       .map((v) => v.trim())
       .find((v) => v.startsWith(cookieName + "="))
       ?.slice(cookieName.length + 1);
-    if (token)
-      store.db.prepare("DELETE FROM sessions WHERE token=?").run(hash(token));
+    if (token) await store.deleteSession(hash(token));
     res.clearCookie(cookieName, {
       path: "/",
       httpOnly: true,
@@ -214,6 +212,14 @@ export function createApp(
     res.json({ ok: true });
   });
   const running = new Set<string>();
+  function background(work: Promise<unknown>) {
+    const guarded = work.catch(() =>
+      console.error(
+        "Background synchronization could not finish; durable state retained.",
+      ),
+    );
+    if (options.background) options.background(guarded);
+  }
   async function sync(e: Entry) {
     if (running.has(e.id) || !memory.configured) return;
     running.add(e.id);
@@ -221,16 +227,16 @@ export function createApp(
     try {
       // Persist an ambiguous state BEFORE a network write. A crash can never blindly resubmit it.
       if (!jobId) {
-        store.sync(e.id, "submitting", null, null, null);
+        if (!(await store.claim(e.id))) return;
         jobId = await memory.remember(e);
-        store.sync(e.id, "pending", jobId, null, null);
+        await store.sync(e.id, "pending", jobId, null, null);
       }
       const blob = await memory.wait(e.userId, jobId);
-      store.sync(e.id, "synced", jobId, blob, null);
+      await store.sync(e.id, "synced", jobId, blob, null);
     } catch (err) {
       const failed =
         err instanceof Error && err.message.startsWith("remember job failed:");
-      store.sync(
+      await store.sync(
         e.id,
         failed ? "failed" : jobId ? "pending" : "uncertain",
         jobId,
@@ -249,16 +255,17 @@ export function createApp(
     const { userId, ...rest } = e;
     return rest;
   }
-  app.get("/api/entries", (_req, res) =>
-    res.json({ entries: store.list(res.locals.user.id).map(safe) }),
-  );
+  app.get("/api/entries", async (_req, res) => {
+    if (options.background) background(resume(res.locals.user.id));
+    res.json({ entries: (await store.list(res.locals.user.id)).map(safe) });
+  });
   app.post("/api/entries", async (req, res) => {
     const parsed = entrySchema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: parsed.error.issues[0].message });
     const userId = res.locals.user.id;
     const old = parsed.data.supersedes
-      ? store.get(parsed.data.supersedes, userId)
+      ? await store.get(parsed.data.supersedes, userId)
       : undefined;
     if (parsed.data.supersedes && (!old || old.retired))
       return res
@@ -279,12 +286,12 @@ export function createApp(
       error: null,
       retired: false,
     };
-    store.insert(e);
-    void sync(e);
+    await store.insert(e);
+    background(sync(e));
     res.status(202).json({ entry: safe(e) });
   });
   app.post("/api/entries/:id/check", async (req, res) => {
-    const e = store.get(String(req.params.id), res.locals.user.id);
+    const e = await store.get(String(req.params.id), res.locals.user.id);
     if (!e) return res.status(404).json({ error: "Không tìm thấy trang này." });
     if (e.status === "uncertain") {
       if (running.has(e.id)) return res.json({ entry: safe(e) });
@@ -303,8 +310,8 @@ export function createApp(
           }
         });
         if (found) {
-          store.sync(e.id, "synced", e.jobId, found.blob_id, null);
-          return res.json({ entry: safe(store.get(e.id, e.userId)!) });
+          await store.sync(e.id, "synced", e.jobId, found.blob_id, null);
+          return res.json({ entry: safe((await store.get(e.id, e.userId))!) });
         }
       } catch {}
       return res.status(409).json({
@@ -312,11 +319,11 @@ export function createApp(
           "Chưa tìm thấy bản ghi khi đối soát. Dữ liệu cục bộ vẫn được giữ; ứng dụng chưa gửi lại để tránh tạo bản sao.",
       });
     }
-    if (e.status !== "synced") void sync(e);
+    if (e.status !== "synced") background(sync(e));
     res.json({ entry: safe(e) });
   });
-  app.post("/api/entries/:id/forget", (req, res) => {
-    const e = store.get(String(req.params.id), res.locals.user.id);
+  app.post("/api/entries/:id/forget", async (req, res) => {
+    const e = await store.get(String(req.params.id), res.locals.user.id);
     if (!e || e.retired)
       return res.status(404).json({ error: "Không tìm thấy trang này." });
     const n: Entry = {
@@ -332,8 +339,8 @@ export function createApp(
       blobId: null,
       error: null,
     };
-    store.insert(n);
-    void sync(n);
+    await store.insert(n);
+    background(sync(n));
     res.json({ entry: safe(n) });
   });
   const chatLimiter = rateLimit({
@@ -359,22 +366,38 @@ export function createApp(
           .default([]),
         useMemory: z.boolean().default(true),
         language: z.enum(["en", "vi"]).default("vi"),
+        llm: z
+          .object({
+            provider: z.enum(["gemini", "openai"]),
+            apiKey: z.string().trim().min(10).max(512),
+            model: z
+              .string()
+              .trim()
+              .min(1)
+              .max(100)
+              .regex(/^[a-zA-Z0-9_.:-]+$/),
+          })
+          .optional(),
       })
       .safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Tin nhắn chưa hợp lệ." });
-    if (!model.configured)
+    const requestModel = parsed.data.llm
+      ? new LocalModel(parsed.data.llm)
+      : model;
+    if (!requestModel.configured)
       return res.status(503).json({
-        error: "Ollama chưa được cấu hình. Nhật ký của bạn vẫn dùng được.",
+        error:
+          "Chưa cấu hình AI. Thêm khóa Gemini hoặc OpenAI trong Cài đặt để trò chuyện.",
       });
     const { message, history, useMemory } = parsed.data;
     let sources: Source[] = [];
     if (useMemory && memory.configured) {
       try {
         const remote = await memory.recall(res.locals.user.id, message);
-        const active = store
-          .list(res.locals.user.id)
-          .filter((e) => e.consent && e.status === "synced");
+        const active = (await store.list(res.locals.user.id)).filter(
+          (e) => e.consent && e.status === "synced",
+        );
         const seen = new Set<string>();
         for (const r of remote) {
           const e = active.find((e) => e.blobId === r.blob_id);
@@ -414,7 +437,7 @@ export function createApp(
     // Do not trust old client-provided history to reintroduce withdrawn memories.
     const safeHistory = history.filter((m) => m.role === "user");
     try {
-      const answer = await model.answer(
+      const answer = await requestModel.answer(
         message,
         safeHistory,
         sources,
@@ -423,29 +446,31 @@ export function createApp(
       // A withdrawal/edit may finish while the LLM is generating. The prompt
       // cannot be recalled, but the obsolete answer must not be published.
       if (
-        sources.some((source) => {
-          const current = store.get(source.id, res.locals.user.id);
-          return (
-            !current ||
-            current.retired ||
-            !current.consent ||
-            current.status !== "synced" ||
-            current.blobId !== source.blobId ||
-            current.memory !== source.text
-          );
-        })
+        (
+          await Promise.all(
+            sources.map(async (source) => {
+              const current = await store.get(source.id, res.locals.user.id);
+              return (
+                !current ||
+                current.retired ||
+                !current.consent ||
+                current.status !== "synced" ||
+                current.blobId !== source.blobId ||
+                current.memory !== source.text
+              );
+            }),
+          )
+        ).some(Boolean)
       ) {
-        return res
-          .status(409)
-          .json({
-            error:
-              "Ký ức đã thay đổi khi đang trả lời. Hãy gửi lại câu hỏi để dùng thông tin hiện tại.",
-          });
+        return res.status(409).json({
+          error:
+            "Ký ức đã thay đổi khi đang trả lời. Hãy gửi lại câu hỏi để dùng thông tin hiện tại.",
+        });
       }
       res.json({
         answer,
         sources,
-        model: model.name,
+        model: requestModel.name,
         memoryUsed: sources.length > 0,
         memoryBudget: context.meta,
       });
@@ -454,12 +479,12 @@ export function createApp(
         error:
           err instanceof Error && err.message.startsWith("LLM")
             ? err.message
-            : "Chưa kết nối được Ollama/model. Hãy khởi động Ollama và tải model trong Settings.",
+            : "Chưa kết nối được dịch vụ AI. Kiểm tra khóa, model và dịch vụ trong Cài đặt.",
       });
     }
   });
-  app.get("/api/export", (req, res) => {
-    const entries = store.list(res.locals.user.id);
+  app.get("/api/export", async (req, res) => {
+    const entries = await store.list(res.locals.user.id);
     const format = req.query.format === "md" ? "md" : "json";
     res.setHeader(
       "Content-Disposition",
@@ -497,10 +522,10 @@ export function createApp(
         .json({ error: "Yêu cầu không thực hiện được. Vui lòng thử lại." });
     },
   );
-  return {
-    app,
-    resume: () => {
-      for (const e of store.pending()) void sync(e);
-    },
-  };
+  async function resume(userId?: string) {
+    await Promise.all(
+      (await store.pending(userId)).map((entry) => sync(entry)),
+    );
+  }
+  return { app, resume };
 }

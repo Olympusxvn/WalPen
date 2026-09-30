@@ -48,6 +48,8 @@ WalPen is a journaling app for people who want continuity between conversations 
 
 **Run on your own computer:** follow [SETUP.md](SETUP.md), then run `npm run setup:local`. It prepares a separate local profile, installs dependencies, downloads the Ollama model and starts WalPen. A journal-only option is available without Ollama; Walrus memory requires your own MemWal credentials.
 
+Cloud migration is being prepared so judges can use the public demo while the developer's computer is off. See [deployment and verification status](docs/CLOUD-DEPLOYMENT.md); the existing deployment description below remains valid until cutover is confirmed.
+
 **Start with the [live demo](https://walpen.vercel.app).** Choose **VI** or **EN**, then register using the demo invitation code `walpen-sessions-2026`. The API and Ollama run on the developer's computer; account access and chat require that host and its tunnel to remain online.
 
 1. Write a short fictional entry with a fact you can check, such as a planned activity.

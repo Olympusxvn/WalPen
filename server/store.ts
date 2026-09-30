@@ -1,12 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
-import {
-  createCipheriv,
-  createDecipheriv,
-  randomBytes,
-  createHash,
-} from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import type { Repository, UserRecord } from "./repository.ts";
+import { encryptPayload, decryptPayload } from "./encryption.ts";
 
 export interface Entry {
   id: string;
@@ -28,7 +25,7 @@ export interface Entry {
   retired: boolean;
 }
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
-export class Store {
+export class Store implements Repository {
   db: DatabaseSync;
   constructor(
     path: string,
@@ -48,18 +45,10 @@ export class Store {
     );
   }
   encrypt(value: unknown) {
-    const iv = randomBytes(12);
-    const c = createCipheriv("aes-256-gcm", this.key, iv);
-    const data = Buffer.concat([c.update(JSON.stringify(value)), c.final()]);
-    return Buffer.concat([iv, c.getAuthTag(), data]).toString("base64");
+    return encryptPayload(this.key, value);
   }
   decrypt(value: string) {
-    const b = Buffer.from(value, "base64");
-    const d = createDecipheriv("aes-256-gcm", this.key, b.subarray(0, 12));
-    d.setAuthTag(b.subarray(12, 28));
-    return JSON.parse(
-      Buffer.concat([d.update(b.subarray(28)), d.final()]).toString(),
-    );
+    return decryptPayload(this.key, value);
   }
   decode(row: any): Entry {
     const { payload, ...rest } = row;
@@ -79,11 +68,49 @@ export class Store {
       .all(userId)
       .map((r) => this.decode(r));
   }
-  pending(): Entry[] {
+  session(token: string, now: number) {
+    return this.db
+      .prepare(
+        "SELECT users.id,users.username FROM sessions JOIN users ON users.id=sessions.userId WHERE sessions.token=? AND sessions.expires>?",
+      )
+      .get(token, now) as { id: string; username: string } | undefined;
+  }
+  addSession(token: string, userId: string, expires: number) {
+    this.db.prepare("DELETE FROM sessions WHERE expires<?").run(Date.now());
+    this.db
+      .prepare("INSERT INTO sessions VALUES(?,?,?)")
+      .run(token, userId, expires);
+  }
+  deleteSession(token: string) {
+    this.db.prepare("DELETE FROM sessions WHERE token=?").run(token);
+  }
+  userByName(username: string) {
+    return this.db
+      .prepare("SELECT * FROM users WHERE username=?")
+      .get(username) as UserRecord | undefined;
+  }
+  addUser(user: UserRecord) {
+    this.db
+      .prepare("INSERT INTO users VALUES(?,?,?,?)")
+      .run(user.id, user.username, user.password, user.createdAt);
+  }
+  claim(id: string) {
+    return (
+      Number(
+        this.db
+          .prepare(
+            "UPDATE entries SET status='submitting' WHERE id=? AND status='queued' AND jobId IS NULL",
+          )
+          .run(id).changes,
+      ) === 1
+    );
+  }
+  pending(userId?: string): Entry[] {
     return this.db
       .prepare("SELECT * FROM entries WHERE status IN ('queued','pending')")
       .all()
-      .map((r) => this.decode(r));
+      .map((r) => this.decode(r))
+      .filter((entry) => !userId || entry.userId === userId);
   }
   insert(e: Entry) {
     this.db.exec("BEGIN IMMEDIATE");

@@ -1,6 +1,39 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LocalModel } from "../server/llm.ts";
+test("BYOK credentials remain isolated between concurrent requests", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  const seen: string[] = [];
+  globalThis.fetch = async (url, init) => {
+    assert.ok(
+      String(url).startsWith("https://generativelanguage.googleapis.com/"),
+    );
+    seen.push(new Headers(init?.headers).get("x-goog-api-key")!);
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: { parts: [{ text: "A real provider response shape." }] },
+            finishReason: "STOP",
+          },
+        ],
+      }),
+    );
+  };
+  await Promise.all(
+    ["key-for-first-user", "key-for-second-user"].map((apiKey) =>
+      new LocalModel({
+        provider: "gemini",
+        apiKey,
+        model: "test-model",
+      }).answer("Hi", [], []),
+    ),
+  );
+  assert.deepEqual(seen.sort(), ["key-for-first-user", "key-for-second-user"]);
+});
 test("Ollama receives the selected language and instruct models do not request thinking", async (t) => {
   const fetchBefore = globalThis.fetch,
     provider = process.env.LLM_PROVIDER,
