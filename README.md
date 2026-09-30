@@ -31,6 +31,8 @@ WalPen is a journaling app for people who want continuity between conversations 
 
 **Storage and consent are separate:** saving uploads the journal record to Walrus Mainnet. Approval determines which excerpt may enter the chatbot's context. Chat messages are not automatically saved as memories.
 
+**Current status — 30 September 2026:** the frontend and API run on Vercel with Neon persistence. Slush currently shows a **“Malicious website”** warning during wallet testing. The owner has submitted a review request; clearance has not been confirmed. Do not bypass the warning. See the [review notes](docs/SLUSH-REVIEW.md) and [changelog](CHANGELOG.md).
+
 <a id="contents"></a>
 ## 📑 Contents
 
@@ -48,7 +50,9 @@ WalPen is a journaling app for people who want continuity between conversations 
 
 **Run on your own computer:** follow [SETUP.md](SETUP.md), then run `npm run setup:local`. It prepares a separate local profile, installs dependencies, downloads the Ollama model and starts WalPen. A journal-only option is available without Ollama; Walrus memory requires your own MemWal credentials.
 
-**Start with the [live demo](https://walpen.vercel.app).** Choose **VI** or **EN**, connect a Sui wallet and approve the personal sign-in message. Use invitation code `walpen-sessions-2026` on the first visit. Add your Gemini or OpenAI API key in **Settings** to chat. The website and API run on Vercel with persistent state in Neon; the developer's computer can be off. Your provider's model access, quotas and charges apply.
+**[Live demo](https://walpen.vercel.app):** the intended wallet flow is **VI/EN → Connect Sui wallet → approve a personal sign-in message**, with invitation code `walpen-sessions-2026` on the first visit. Slush access remains blocked pending review, so this is not yet a verified Slush onboarding path. The application requests no transaction or gas payment for sign-in.
+
+Cloud chat requires your Gemini or OpenAI API key in **Settings**. Your provider's model access, quotas and charges apply. A successful response using a real cloud-provider key remains unverified; the recorded answer-quality examples below used local Ollama. The website and API operate without the developer's computer running.
 
 Existing password accounts can sign in using **Existing account / password sign-in**, then link a Sui wallet in Settings. Linking keeps their journal and existing Walrus namespace. See the [friend testing guide](docs/FRIEND-TEST-GUIDE.vi.md) and [deployment evidence](docs/CLOUD-DEPLOYMENT.md).
 
@@ -72,6 +76,8 @@ npm run build
 | [MemWal integration notes](docs/MEMWAL-PR-INTEGRATION.md) | Token budgeting, deletion filtering and the deployed test |
 | [Integration tests](tests/app.test.ts) | User isolation, consent, revisions and write recovery |
 | [Memory budget tests](tests/memory-context.test.ts) | Whole excerpts, Unicode, source limits and estimates |
+| [Wallet tests](tests/wallet.test.ts) | Signature verification, replay prevention, expiry and existing-account linking |
+| [Cloud integration test](tests/postgres.integration.ts) | Persistence and synchronization across application instances using PostgreSQL |
 
 <a id="workflow"></a>
 ## 🌿 Journal and memory workflow
@@ -114,7 +120,7 @@ flowchart TD
 
 The API derives namespaces from authenticated user IDs. A verified wallet maps to a stable ID; an address supplied by the browser alone cannot authorize recall. After recall, the API validates blob identity, the active revision, consent and the approved excerpt before passing context to the selected model. It checks selected sources again after generation to catch edits or withdrawals made while the model was answering.
 
-The 768-token budget covers the serialized memory context only. It uses MemWal's character-based estimate, not exact Qwen tokenization or a limit on the entire prompt.
+The 768-token budget covers the serialized memory context only. It uses MemWal's character-based estimate, not exact model tokenization or a limit on the entire prompt.
 
 <a id="quick-start"></a>
 ## ⚡ Quick start
@@ -182,7 +188,9 @@ For the documented local Ollama setup, leave `LLM_API_KEY` empty. The historical
 <a id="mainnet"></a>
 ## ⛓️ Mainnet evidence
 
-Verification recorded through **29 September 2026**:
+**Cloud verification — 30 September 2026:** migrated-account login and journal retrieval passed. A fictional entry submitted through the cloud API received a confirmed Walrus blob receipt, and public API health remained successful after the local API and tunnel stopped. Twenty-seven local tests and one live-Neon integration test passed. A synthetic unfunded wallet completed production sign-in and retained its session after reload; that test did not exercise Slush's security screening. See [deployment evidence and limits](docs/CLOUD-DEPLOYMENT.md).
+
+Earlier verification through **29 September 2026**, using the local API/Ollama deployment:
 
 | Check | Recorded result |
 |:---|:---|
@@ -211,6 +219,8 @@ Local evidence is intentionally excluded from Git:
 - `data/evidence/public-e2e.json` — memory-off / memory-on responses.
 - `data/evidence/five-days.json` and `five-days-report.md` — fictional-page checks and recovery results.
 - `data/evidence/pr-integration-live.json` — public check after the MemWal integration update.
+- `data/evidence/cloud-cutover-2026-09-30.json` — cloud API checks and confirmed fictional Walrus write.
+- `data/evidence/cloud-wallet-auth.json` — production authentication with a synthetic wallet, not a Slush clearance test.
 
 Public summaries are in [implementation status](docs/IMPLEMENTATION-STATUS.md), [integration notes](docs/MEMWAL-PR-INTEGRATION.md) and the [incident report](docs/MEMWAL-ENCRYPTION-INCIDENT.md).
 
@@ -239,6 +249,7 @@ The hosted relayer's reported build contains #885's exclusion query; runtime act
 |:---|:---|
 | `npm run dev` | Watch the API and serve the Vite frontend |
 | `npm test` | Isolated automated tests; no Mainnet writes or model calls |
+| `npm run test:cloud` | Live PostgreSQL integration test; requires `WALPEN_TEST_DATABASE_URL` pointing to a test database with permission to create an isolated schema |
 | `npm run build` | Type-check and build the frontend |
 | `npm start` | Start the API and serve an existing `dist/` build |
 | `npm run check:secrets` | Check source files for configured secret values; not a comprehensive secret detector |
@@ -278,7 +289,7 @@ npm run backup
 
 For local installations, snapshots are stored under `data/backups/`. For cloud, use Neon database backup/export facilities and retain the original encryption key separately. Changing the key without migrating encrypted records makes those records unreadable.
 
-To restore, stop WalPen, point `DATABASE_PATH` to a copy of a snapshot, keep the same `DATA_ENCRYPTION_KEY`, and restart. Test the copy on a separate port before replacing the live database. Snapshots preserve user mappings, current revisions and withdrawn-memory state.
+To restore a **local SQLite installation**, stop WalPen, point `DATABASE_PATH` to a copy of a snapshot, keep the same `DATA_ENCRYPTION_KEY`, and restart. Test the copy on a separate port before replacing the live database. Snapshots preserve user mappings, current revisions and withdrawn-memory state. This procedure does not restore the production Neon database.
 
 MemWal's `restore` repairs its search index; it does not reconstruct WalPen accounts or the local database. Full recovery from Walrus alone is not implemented. JSON/Markdown exports preserve readable journal content, not the complete account state.
 
@@ -287,6 +298,10 @@ MemWal's `restore` repairs its search index; it does not reconstruct WalPen acco
 
 | 📄 Document | 📍 Purpose |
 |:---|:---|
+| [Changelog](CHANGELOG.md) | Cloud migration, wallet authentication, fixes and known limitations |
+| [Cloud deployment](docs/CLOUD-DEPLOYMENT.md) | Vercel/Neon configuration, completed migration and verification |
+| [Friend testing guide](docs/FRIEND-TEST-GUIDE.vi.md) | Vietnamese onboarding and real multi-day feedback collection |
+| [Slush review](docs/SLUSH-REVIEW.md) | Reported website warning, completed checks and submitted-review status |
 | [Implementation status](docs/IMPLEMENTATION-STATUS.md) | Verified results and outstanding work |
 | [MemWal PR integration](docs/MEMWAL-PR-INTEGRATION.md) | #605/#885 adoption and validation |
 | [Article draft](docs/ARTICLE-EN.md) | Build story, before/after and integration lessons; not yet published on Medium/Inkray |
@@ -313,11 +328,14 @@ MemWal's `restore` repairs its search index; it does not reconstruct WalPen acco
 <a id="status"></a>
 ## ✅ Project status
 
-- [x] Bilingual journal, online AI with personal keys, and optional local Qwen companion.
-- [x] Confirmed Mainnet writes and fresh-session recall with source references.
+- [x] Bilingual journal, personal-key cloud AI adapters, and optional local Qwen companion.
+- [x] Confirmed Mainnet writes, including a cloud write; earlier local/Ollama fresh-session recall with source references.
 - [x] Consent/revision filtering, memory budgeting and recovery tests.
 - [x] Cloud frontend/API, Neon state, and documented local setup.
+- [x] Sui signature authentication verified with a synthetic wallet; existing-account linking covered by tests.
 - [x] Three new MemWal feedback tickets from the Session 8 build.
+- [ ] Slush warning cleared and sign-in verified with the actual wallet.
+- [ ] Successful cloud-provider answer and fresh-conversation recall verified with a valid personal AI key.
 - [ ] Documented real-user feedback beyond synthetic fixtures.
 - [ ] Full recovery of application account/consent state from Walrus alone.
 - [ ] Published article/social links, dedicated Sessions wallet and final submission confirmation.
