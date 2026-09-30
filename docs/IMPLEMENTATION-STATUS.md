@@ -47,3 +47,11 @@ Update 29 September 2026: the observed five-day-test encryption incident was rep
 The requested recovery documentation and receipt-lookup proposals were submitted as [#1048](https://github.com/MystenLabs/MemWal/issues/1048) and [#1049](https://github.com/MystenLabs/MemWal/issues/1049). The local Airtable draft includes them; the online form has not been submitted.
 
 MemWal PR #605's SDK helper now bounds authorized memory context to 768 estimated tokens. PR #885's exclusion query is present in the hosted relayer's reported build; activation still depends on its runtime schema/configuration. WalPen additionally rejects obsolete answers after concurrent edits/withdrawal. The updated Vercel app passed a real read-only recall/chat check: correct park/20-minute answer, five sources, estimated memory cost 201 tokens, 79.5-second latency. See [integration details](MEMWAL-PR-INTEGRATION.md).
+
+## Demo recovery — 30 September 2026
+
+The public frontend returned HTTP 200, but `/api/health` returned HTTP 502. The local API was not listening and no Cloudflare tunnel process was running; Ollama remained available. The frontend's generic connection-interrupted message was the fallback for the non-JSON gateway response.
+
+Restarted the API and tunnel with `scripts/start-demo.ps1 -Deploy`, updated the external rewrite and deployed `dpl_BjWXbQUA3z9AGw98uZjfTZAPsqwU`. Local, tunnel and public health checks then returned HTTP 200. The browser loaded six existing journal pages. A fresh authenticated chat recalled the expected park/20-minute fixture with its source, five approved excerpts and 201 estimated memory-context tokens in 75.5 seconds. No new memory was written for verification; evidence is stored locally at `data/evidence/demo-recovery-2026-09-30.json`.
+
+This was an availability/configuration recovery, with no application-logic change. Live health, login, browser loading and recall checks verified the fix. The existing local-host dependency remains: shutting down the API/tunnel or sleeping the machine interrupts service; stable unattended availability requires an always-on backend and stable tunnel/domain.
