@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Repository, UserRecord } from "./repository.ts";
+import type { Repository, UserRecord, WalletChallenge } from "./repository.ts";
 import { encryptPayload, decryptPayload } from "./encryption.ts";
 
 export interface Entry {
@@ -40,6 +40,9 @@ export class Store implements Repository {
       CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES users(id), rootId TEXT NOT NULL, revision INTEGER NOT NULL, supersedes TEXT, payload TEXT NOT NULL, createdAt TEXT NOT NULL, status TEXT NOT NULL, jobId TEXT, blobId TEXT, error TEXT, retired INTEGER NOT NULL DEFAULT 0);
       CREATE INDEX IF NOT EXISTS entries_user ON entries(userId, retired, createdAt);`);
+    this.db
+      .exec(`CREATE TABLE IF NOT EXISTS wallets(address TEXT PRIMARY KEY, userId TEXT UNIQUE NOT NULL REFERENCES users(id));
+      CREATE TABLE IF NOT EXISTS wallet_challenges(id TEXT PRIMARY KEY,address TEXT NOT NULL,message TEXT NOT NULL,browserHash TEXT NOT NULL,expires INTEGER NOT NULL,userId TEXT);`);
     this.db.exec(
       "UPDATE entries SET status='uncertain', error='Tiến trình trước đã dừng trong khi gửi. Hãy đối soát trước khi thử lại.' WHERE status='submitting'",
     );
@@ -71,9 +74,60 @@ export class Store implements Repository {
   session(token: string, now: number) {
     return this.db
       .prepare(
-        "SELECT users.id,users.username FROM sessions JOIN users ON users.id=sessions.userId WHERE sessions.token=? AND sessions.expires>?",
+        "SELECT users.id,users.username,wallets.address AS walletAddress FROM sessions JOIN users ON users.id=sessions.userId LEFT JOIN wallets ON wallets.userId=users.id WHERE sessions.token=? AND sessions.expires>?",
       )
       .get(token, now) as { id: string; username: string } | undefined;
+  }
+  addWalletChallenge(challenge: WalletChallenge) {
+    this.db
+      .prepare("DELETE FROM wallet_challenges WHERE expires<?")
+      .run(Date.now());
+    this.db
+      .prepare("INSERT INTO wallet_challenges VALUES(?,?,?,?,?,?)")
+      .run(
+        challenge.id,
+        challenge.address,
+        challenge.message,
+        challenge.browserHash,
+        challenge.expires,
+        challenge.userId,
+      );
+  }
+  getWalletChallenge(id: string, browserHash: string, now: number) {
+    return this.db
+      .prepare(
+        "SELECT * FROM wallet_challenges WHERE id=? AND browserHash=? AND expires>?",
+      )
+      .get(id, browserHash, now) as WalletChallenge | undefined;
+  }
+  consumeWalletChallenge(id: string, browserHash: string, now: number) {
+    return (
+      Number(
+        this.db
+          .prepare(
+            "DELETE FROM wallet_challenges WHERE id=? AND browserHash=? AND expires>?",
+          )
+          .run(id, browserHash, now).changes,
+      ) === 1
+    );
+  }
+  walletUser(address: string) {
+    return this.db
+      .prepare(
+        "SELECT users.* FROM users JOIN wallets ON wallets.userId=users.id WHERE wallets.address=?",
+      )
+      .get(address) as UserRecord | undefined;
+  }
+  bindWallet(address: string, user: UserRecord, create: boolean) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (create) this.addUser(user);
+      this.db.prepare("INSERT INTO wallets VALUES(?,?)").run(address, user.id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
   addSession(token: string, userId: string, expires: number) {
     this.db.prepare("DELETE FROM sessions WHERE expires<?").run(Date.now());

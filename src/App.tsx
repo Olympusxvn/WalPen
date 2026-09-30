@@ -1,6 +1,8 @@
 import { t, getLocale, useLanguage } from "./i18n";
 import { useEffect, useRef, useState } from "react";
 import { CloudAISettings, type AICredentials } from "./CloudAISettings";
+import { WalletLogin } from "./WalletLogin";
+import { useCurrentAccount, useDAppKit } from "@mysten/dapp-kit-react";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -41,7 +43,7 @@ type Entry = {
   error: string | null;
   blobId: string | null;
 };
-type User = { id: string; username: string };
+type User = { id: string; username: string; walletAddress?: string };
 type Source = {
   id: string;
   title: string;
@@ -139,6 +141,10 @@ function Botanical() {
   );
 }
 export default function App() {
+  const walletAccount = useCurrentAccount(),
+    walletKit = useDAppKit();
+  const previousWallet = useRef<string | null>(null);
+  const [legacyLogin, setLegacyLogin] = useState(false);
   const [language, setLanguage] = useLanguage();
   const [aiCredentials, setAiCredentials] = useState<AICredentials | null>(
     null,
@@ -172,6 +178,23 @@ export default function App() {
     [thinking, setThinking] = useState(false),
     [useMemory, setUseMemory] = useState(true);
   const chatEnd = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const address = walletAccount?.address.toLowerCase() || null;
+    if (
+      user?.walletAddress &&
+      ((address && address !== user.walletAddress) ||
+        (previousWallet.current && !address))
+    ) {
+      saveAI(null);
+      setUser(null);
+      setEntries([]);
+      setMessages([]);
+      setSelected(null);
+      setAuth(true);
+      void api("/logout", {}).catch(() => {});
+    }
+    previousWallet.current = address;
+  }, [walletAccount?.address, user?.walletAddress]);
   useEffect(() => {
     setAiCredentials(null);
     if (!user) return;
@@ -466,7 +489,11 @@ export default function App() {
               className="user-info"
               onClick={() => (user ? go("settings") : setAuth(true))}
             >
-              <strong>{user?.username || t("Chào người bạn mới")}</strong>
+              <strong>
+                {user?.walletAddress
+                  ? `${user.walletAddress.slice(0, 6)}…${user.walletAddress.slice(-4)}`
+                  : user?.username || t("Chào người bạn mới")}
+              </strong>
               <small>
                 {user
                   ? t("Một khoảng lặng của riêng bạn")
@@ -480,6 +507,7 @@ export default function App() {
                 onClick={async () => {
                   try {
                     await api("/logout", {});
+                    await walletKit.disconnectWallet();
                     saveAI(null);
                     setUser(null);
                     setEntries([]);
@@ -1152,6 +1180,30 @@ export default function App() {
                   {t("THOẢI MÁI THEO CÁCH CỦA BẠN")}
                 </div>
                 <h1>{t("Một không gian riêng.")}</h1>
+                {user && (
+                  <section className="settings-card">
+                    {user.walletAddress ? (
+                      <>
+                        <h2>Sui wallet</h2>
+                        <p className="wallet-address">{user.walletAddress}</p>
+                      </>
+                    ) : (
+                      <WalletLogin
+                        language={language}
+                        inviteRequired={false}
+                        link
+                        onSuccess={(signedUser) => {
+                          setUser(signedUser);
+                          setNotice(
+                            language === "en"
+                              ? "Wallet linked. Your journal and memory namespace are unchanged."
+                              : "Đã liên kết ví. Nhật ký và namespace bộ nhớ được giữ nguyên.",
+                          );
+                        }}
+                      />
+                    )}
+                  </section>
+                )}
                 <section className="settings-card">
                   <ShieldCheck size={23} />
                   <h2>{t("Bạn biết dữ liệu của mình đi đâu.")}</h2>
@@ -1294,90 +1346,116 @@ export default function App() {
                 "Đăng nhập để tìm lại những trang viết và ký ức qua mỗi lần ghé thăm.",
               )}
             </p>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setBusy(true);
-                setError("");
-                const f = new FormData(e.currentTarget);
-                try {
-                  const d = await api(register ? "/register" : "/login", {
-                    username: f.get("username"),
-                    password: f.get("password"),
-                    inviteCode: f.get("inviteCode") || undefined,
-                  });
-                  setUser(d.user);
-                  setAuth(false);
-                  setNotice(t("Chào bạn. Trang giấy đã sẵn sàng."));
-                } catch (err: any) {
-                  setError(err.message);
-                } finally {
-                  setBusy(false);
-                }
+            <WalletLogin
+              language={language}
+              inviteRequired={inviteRequired}
+              onSuccess={(signedUser) => {
+                setUser(signedUser);
+                setAuth(false);
+                setNotice(t("Chào bạn. Trang giấy đã sẵn sàng."));
               }}
-            >
-              <label>
-                {t("Tên tài khoản")}
-                <input
-                  name="username"
-                  autoComplete="username"
-                  required
-                  minLength={3}
-                  maxLength={40}
-                  pattern="[a-zA-Z0-9_.\-]+"
-                  placeholder={t("Tên bạn muốn dùng")}
-                />
-              </label>
-              <label>
-                {t("Mật khẩu")}
-                <input
-                  name="password"
-                  autoComplete={register ? "new-password" : "current-password"}
-                  type="password"
-                  required
-                  minLength={10}
-                  maxLength={128}
-                  placeholder={t("Ít nhất 10 ký tự")}
-                />
-              </label>
-              {register && inviteRequired && (
-                <label>
-                  {t("Mã mời")}
-                  <input name="inviteCode" required />
-                </label>
-              )}
-              {error && (
-                <div className="inline-error" role="alert">
-                  {t(error)}
-                </div>
-              )}
-              <button className="primary full" disabled={busy}>
-                {busy ? (
-                  <LoaderCircle className="spin" size={16} />
-                ) : (
-                  <ArrowRight size={16} />
-                )}{" "}
-                {register
-                  ? t("Tạo không gian của mình")
-                  : t("Mở nhật ký của mình")}
-              </button>
-            </form>
+            />
             <button
               className="text-button centered"
               onClick={() => {
-                setRegister(!register);
-                setError("");
+                setLegacyLogin(!legacyLogin);
+                setRegister(false);
               }}
             >
-              {register
-                ? t("Đã có tài khoản? Đăng nhập")
-                : t("Lần đầu ghé thăm? Tạo tài khoản")}
+              {language === "en"
+                ? "Existing account / password sign-in"
+                : "Tài khoản cũ / đăng nhập bằng mật khẩu"}
             </button>
-            <p className="small muted">
-              {t(
-                "Bản thử nghiệm chưa hỗ trợ đặt lại mật khẩu. Hãy giữ mật khẩu của bạn.",
-              )}
-            </p>
+            {legacyLogin && (
+              <>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setBusy(true);
+                    setError("");
+                    const f = new FormData(e.currentTarget);
+                    try {
+                      const d = await api(register ? "/register" : "/login", {
+                        username: f.get("username"),
+                        password: f.get("password"),
+                        inviteCode: f.get("inviteCode") || undefined,
+                      });
+                      setUser(d.user);
+                      setAuth(false);
+                      setNotice(t("Chào bạn. Trang giấy đã sẵn sàng."));
+                    } catch (err: any) {
+                      setError(err.message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <label>
+                    {t("Tên tài khoản")}
+                    <input
+                      name="username"
+                      autoComplete="username"
+                      required
+                      minLength={3}
+                      maxLength={40}
+                      pattern="[a-zA-Z0-9_.\-]+"
+                      placeholder={t("Tên bạn muốn dùng")}
+                    />
+                  </label>
+                  <label>
+                    {t("Mật khẩu")}
+                    <input
+                      name="password"
+                      autoComplete={
+                        register ? "new-password" : "current-password"
+                      }
+                      type="password"
+                      required
+                      minLength={10}
+                      maxLength={128}
+                      placeholder={t("Ít nhất 10 ký tự")}
+                    />
+                  </label>
+                  {register && inviteRequired && (
+                    <label>
+                      {t("Mã mời")}
+                      <input name="inviteCode" required />
+                    </label>
+                  )}
+                  {error && (
+                    <div className="inline-error" role="alert">
+                      {t(error)}
+                    </div>
+                  )}
+                  <button className="primary full" disabled={busy}>
+                    {busy ? (
+                      <LoaderCircle className="spin" size={16} />
+                    ) : (
+                      <ArrowRight size={16} />
+                    )}{" "}
+                    {register
+                      ? t("Tạo không gian của mình")
+                      : t("Mở nhật ký của mình")}
+                  </button>
+                </form>
+                <button
+                  className="text-button centered"
+                  onClick={() => {
+                    setRegister(!register);
+                    setError("");
+                  }}
+                >
+                  {register
+                    ? t("Đã có tài khoản? Đăng nhập")
+                    : t("Lần đầu ghé thăm? Tạo tài khoản")}
+                </button>
+                <p className="small muted">
+                  {t(
+                    "Bản thử nghiệm chưa hỗ trợ đặt lại mật khẩu. Hãy giữ mật khẩu của bạn.",
+                  )}
+                </p>
+              </>
+            )}
           </section>
         </div>
       )}

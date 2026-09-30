@@ -6,6 +6,7 @@ import request from "supertest";
 import { PostgresStore } from "../server/postgres-store.ts";
 import { createApp } from "../server/app.ts";
 import type { Entry } from "../server/store.ts";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 test("cloud repository preserves sessions, encrypted entries and single-submit claims across instances", async () => {
   if (!process.env.WALPEN_TEST_DATABASE_URL)
@@ -108,6 +109,32 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
     ]);
     assert.equal((await first.pending(userId)).length, 0);
     assert.equal((await first.get(active.id, userId))?.status, "uncertain");
+    const wallet = new Ed25519Keypair();
+    const challenge = await request(app1)
+      .post("/api/wallet/challenge")
+      .set("Cookie", cookie)
+      .send({ address: wallet.toSuiAddress(), link: true })
+      .expect(200);
+    const challengeCookie = challenge.headers["set-cookie"][0].split(";")[0];
+    const signed = await wallet.signPersonalMessage(
+      new TextEncoder().encode(challenge.body.message),
+    );
+    const walletBody = {
+      challengeId: challenge.body.challengeId,
+      signature: signed.signature,
+    };
+    const verified = await request(app2)
+      .post("/api/wallet/verify")
+      .set("Cookie", `${cookie}; ${challengeCookie}`)
+      .send(walletBody)
+      .expect(200);
+    assert.equal(verified.body.user.id, userId);
+    await request(app1)
+      .post("/api/wallet/verify")
+      .set("Cookie", `${cookie}; ${challengeCookie}`)
+      .send(walletBody)
+      .expect(401);
+    assert.equal((await second.walletUser(wallet.toSuiAddress()))?.id, userId);
     await request(app2)
       .post("/api/logout")
       .set("Cookie", cookie)

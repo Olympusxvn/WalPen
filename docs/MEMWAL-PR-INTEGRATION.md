@@ -2,6 +2,8 @@
 
 ## PR #605: token budgeting
 
+Related history: [issue #277](https://github.com/MystenLabs/MemWal/issues/277), filed for Special One, requests serverless guidance on write timing, parallel recall and bounded prompt context. [Issue #592](https://github.com/MystenLabs/MemWal/issues/592) moves context-size budgeting into the SDK through token estimation and truncation. These are related concerns, not interchangeable fixes: a token cap does not enforce a network deadline or guarantee background-write completion. WalPen combines approved-excerpt token budgeting with durable write receipts and Vercel `waitUntil()`.
+
 [PR #605](https://github.com/MystenLabs/MemWal/pull/605) is merged. WalPen's pinned SDK `@mysten-incubation/memwal@0.1.7` already exports `applyTokenBudget` and `estimateTokens`, so no package upgrade or vendored patch is needed.
 
 WalPen now budgets the approved memory context to **768 estimated tokens**, including the serialized reference/date metadata, with at most five sources. It uses the SDK's `high-relevance-only` strategy: retain whole excerpts in recall order and drop the remaining tail when the next excerpt does not fit. Stored journal text is never shortened.

@@ -1,8 +1,8 @@
 # WalPen cloud deployment
 
-Status, 30 September 2026: cloud implementation and database integration tests are prepared. The public site's cutover is pending explicit authorization to transfer the existing MemWal delegate key and journal encryption key into Vercel. The existing public deployment still uses its local backend until cutover is verified.
+Status, 30 September 2026: production runs on Vercel and Neon. The owner explicitly authorized transferring the existing MemWal delegate and journal encryption keys into Vercel server secrets. Migration preserved two users, fifteen active sessions and eleven journal revisions. The old local API and tunnel have been stopped; the public health endpoint remains available.
 
-Verification: 24 local regression tests, one real PostgreSQL integration test using an isolated temporary schema, EN/VI settings checks in Edge with mocked API data, and a successful Vercel preview build (`dpl_4Wx9UbG9gUiBRDiuctBRamnVg5ui`). These do not yet establish a live cloud MemWal write or a successful online-model conversation. Friend testing instructions: [Vietnamese guide and private feedback template](FRIEND-TEST-GUIDE.vi.md).
+Verification: 27 local regression tests, one live PostgreSQL integration test using an isolated temporary schema, EN/VI settings checks in Edge with mocked API data, and production deployment `dpl_3bT8EiTPc6GvvMg8Uy4rzv69DqHa`. A fictional entry submitted through the cloud API received confirmed Walrus blob `QjRit8WOTkX-o0TQlUDOYEJtwgpDshkgaiTslc7P0zM`. Existing-account login and journal retrieval passed. A successful online-model answer still needs a valid personal provider key; mocked provider tests do not establish that. Friend testing instructions: [Vietnamese guide and private feedback template](FRIEND-TEST-GUIDE.vi.md).
 
 ## What moves to the cloud
 
@@ -16,7 +16,9 @@ Verification: 24 local regression tests, one real PostgreSQL integration test us
 
 Neon does not replace Walrus recall. Chat still calls `memory.recall()`, verifies the retrieved blob against the user's current approved revision, and applies the memory context budget before sending excerpts to the model. No matching Walrus sources means no fabricated personal memory.
 
-## Operator cutover
+## Operator cutover record
+
+The migration and deployment steps below are complete. Do not rerun the migration against the populated database. The encrypted SQLite snapshot remains a private backup. TypeScript uses `rewriteRelativeImportExtensions` so Vercel's emitted server JavaScript resolves its internal imports.
 
 1. Connect a Neon Free database to the `walpen` Vercel project. This has been provisioned as `walpen-cloud`, Singapore region. The integration supplies `DATABASE_URL`.
 2. With the owner's authorization, add the following **server-side secret environment variables** for production: `MEMWAL_ACCOUNT_ID`, `MEMWAL_PRIVATE_KEY`, `MEMWAL_SERVER_URL`, `DATA_ENCRYPTION_KEY`, `INVITE_CODE`, and `APP_ORIGIN=https://walpen.vercel.app`. Preserve the original encryption key to read the existing ciphertext. Do not set any `VITE_` or `NEXT_PUBLIC_` secret variable. Leave `LLM_PROVIDER` unset for BYOK-only chat.
@@ -34,7 +36,11 @@ When users open their journal, pending work is checked again. A submission aband
 
 ## Judge access
 
-Open the public website, register with the supplied invitation code, then choose EN/VI. In Settings, enter a Gemini or OpenAI API key and a model supported by that account. The key is held in the browser tab's session storage, sent through the backend for chat, and cleared on logout. WalPen does not store it in PostgreSQL or Walrus. Provider availability, account quotas and charges still apply.
+The production Connect Wallet flow was verified in Edge with a synthetic unfunded wallet, a real cryptographic personal-message signature and session persistence after reload. This verifies the application flow; it is not a claim that every wallet extension or mobile wallet has been tested.
+
+Open the public website, choose EN/VI, then Connect Sui wallet and approve the personal sign-in message. A first-time wallet needs the supplied invitation code. No transaction or gas fee is requested. Existing password users can sign in and link their wallet in Settings without changing their journal ID or Walrus namespace. Challenges expire after five minutes, are bound to the requesting browser, and can be consumed only once.
+
+In Settings, enter a Gemini or OpenAI API key and a model supported by that account. The key is held in the browser tab's session storage, sent through the backend for chat, and cleared on logout. WalPen does not store it in PostgreSQL or Walrus. Provider availability, account quotas and charges still apply.
 
 An online provider receives the current message, supplied user history and selected approved memory excerpts. This is not local-only inference or end-to-end encryption. The relayer's existing plaintext processing also remains unchanged.
 

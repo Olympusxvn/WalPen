@@ -1,6 +1,6 @@
 # WalPen implementation status
 
-Updated: 29 September 2026. Initial verification below dates from 19 September unless noted otherwise. This file distinguishes verified work from remaining competition tasks.
+Updated: 30 September 2026. Initial verification below dates from 19 September unless noted otherwise. This file distinguishes verified work from remaining competition tasks.
 
 ## Implemented
 
@@ -9,8 +9,9 @@ Updated: 29 September 2026. Initial verification below dates from 19 September u
 - Account registration/login, salted scrypt passwords, HttpOnly/SameSite/Secure production sessions, origin validation and request limits.
 - Encrypted SQLite cache, journal revision history, withdrawal filtering, export, consistent backup and restart recovery.
 - MemWal 0.1.7 integration with per-user namespaces, asynchronous confirmation, uncertain-write reconciliation and no blind write retries.
-- Local Ollama provider; language choice passed into generation.
-- Vercel static frontend with an external API rewrite to the local backend's temporary Cloudflare tunnel.
+- Local Ollama provider and request-scoped Gemini/OpenAI personal keys for cloud chat; language choice passed into generation.
+- Vercel frontend and serverless API with Neon persistence, durable write receipts and bounded background synchronization.
+- Sui wallet personal-message authentication, browser-bound expiring challenges, replay prevention and linking to existing password accounts without changing namespaces.
 
 ## Verified so far
 
@@ -29,18 +30,18 @@ The Mainnet facts and browser demo are synthetic test data, not claims of real-u
 
 ## Operational constraints
 
-Ollama, the API, encrypted SQLite database and Cloudflare tunnel live on the user's machine. The Vercel page remains online when the machine sleeps, but its API/chat will be unavailable. Restarting a Quick Tunnel changes its URL and requires updating the rewrite and redeploying. Use `scripts/start-demo.ps1 -Deploy` after checking Ollama and the environment configuration.
+Production no longer depends on the user's machine: Vercel hosts the API and Neon stores encrypted application data. The old local API and tunnel have been stopped. Judges and guests connect a Sui wallet, approve a sign-in message and supply the invitation code on first registration. Cloud chat needs a personal Gemini/OpenAI key in Settings. The local installer remains available for Ollama use.
 
 The original `qwen3:4b` model produced incomplete reasoning in this setup. The demo uses the explicit instruct variant instead. Generation rejects truncated answers, and reference numbers without an actual returned source are removed. This does not guarantee all model claims are correct.
 
-The user explicitly authorized using the provided competition-only delegate key and plans to revoke it after the event. It is held only in ignored local `.env`, never in frontend code or Git. The database encryption key must be preserved to read existing cache/backups.
+The user explicitly authorized transferring the competition delegate key and existing encryption key into Vercel server secrets. They are also retained in ignored local configuration, never in frontend code or Git. The database encryption key must be preserved to read existing cache/backups. The user plans to revoke the delegate after the event.
 
 ## Not yet complete
 
 - Real-user feedback and evidence of actual use.
 - Independent confirmation of the event's agent identifier and dedicated Sessions wallet.
 - Published article, social promotion and final event submission.
-- Permanent backend hosting and complete recovery from Walrus alone.
+- Complete recovery from Walrus alone and a successful cloud-provider answer with a valid personal AI key.
 
 Update 29 September 2026: the observed five-day-test encryption incident was reported at https://github.com/MystenLabs/MemWal/issues/1047. No article, registration or final competition submission has been sent on the user's behalf.
 
@@ -54,4 +55,10 @@ The public frontend returned HTTP 200, but `/api/health` returned HTTP 502. The 
 
 Restarted the API and tunnel with `scripts/start-demo.ps1 -Deploy`, updated the external rewrite and deployed `dpl_BjWXbQUA3z9AGw98uZjfTZAPsqwU`. Local, tunnel and public health checks then returned HTTP 200. The browser loaded six existing journal pages. A fresh authenticated chat recalled the expected park/20-minute fixture with its source, five approved excerpts and 201 estimated memory-context tokens in 75.5 seconds. No new memory was written for verification; evidence is stored locally at `data/evidence/demo-recovery-2026-09-30.json`.
 
-This was an availability/configuration recovery, with no application-logic change. Live health, login, browser loading and recall checks verified the fix. The existing local-host dependency remains: shutting down the API/tunnel or sleeping the machine interrupts service; stable unattended availability requires an always-on backend and stable tunnel/domain.
+This was the earlier availability/configuration recovery, before the cloud cutover below.
+
+## Cloud cutover and wallet login — 30 September 2026
+
+Migrated two users, fifteen active sessions and eleven revisions to Neon, preserving identities and encrypted records. Production deployment `dpl_3bT8EiTPc6GvvMg8Uy4rzv69DqHa` serves the public URL. Existing login and journal retrieval passed. A fictional cloud write received confirmed blob `QjRit8WOTkX-o0TQlUDOYEJtwgpDshkgaiTslc7P0zM`; health remained successful after stopping the local API and tunnel.
+
+Twenty-seven local tests and one isolated live-Neon integration test passed. Edge verified the production Connect Wallet/signature flow with an unfunded synthetic wallet and retained the same account after reload. The test signed a real personal message; it did not exercise a user's installed wallet extension or establish real-user adoption. EN/VI personal-key settings passed mocked UI checks. Online-model generation with a valid key remains unverified. See [cloud operations](CLOUD-DEPLOYMENT.md) and [friend testing](FRIEND-TEST-GUIDE.vi.md).

@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import type { Entry } from "./store.ts";
-import type { Repository, UserRecord } from "./repository.ts";
+import type { Repository, UserRecord, WalletChallenge } from "./repository.ts";
 import { encryptPayload, decryptPayload } from "./encryption.ts";
 
 /** Persistent cloud state; journal payloads use the same encryption as local SQLite. */
@@ -22,6 +22,8 @@ export class PostgresStore implements Repository {
       CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, "userId" TEXT NOT NULL REFERENCES users(id), "rootId" TEXT NOT NULL, revision INTEGER NOT NULL, supersedes TEXT, payload TEXT NOT NULL, "createdAt" TEXT NOT NULL, status TEXT NOT NULL, "jobId" TEXT, "blobId" TEXT, error TEXT, retired INTEGER NOT NULL DEFAULT 0, "syncStartedAt" BIGINT);
       CREATE INDEX IF NOT EXISTS entries_user ON entries("userId", retired, "createdAt");
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
+      CREATE TABLE IF NOT EXISTS wallets(address TEXT PRIMARY KEY, "userId" TEXT UNIQUE NOT NULL REFERENCES users(id));
+      CREATE TABLE IF NOT EXISTS wallet_challenges(id TEXT PRIMARY KEY,address TEXT NOT NULL,message TEXT NOT NULL,"browserHash" TEXT NOT NULL,expires BIGINT NOT NULL,"userId" TEXT);
     `,
       )
       .then(() => undefined)
@@ -41,10 +43,79 @@ export class PostgresStore implements Repository {
   async session(token: string, now: number) {
     return (
       await this.pool.query(
-        'SELECT users.id,users.username FROM sessions JOIN users ON users.id=sessions."userId" WHERE sessions.token=$1 AND sessions.expires>$2',
+        'SELECT users.id,users.username,wallets.address AS "walletAddress" FROM sessions JOIN users ON users.id=sessions."userId" LEFT JOIN wallets ON wallets."userId"=users.id WHERE sessions.token=$1 AND sessions.expires>$2',
         [token, now],
       )
     ).rows[0];
+  }
+  async addWalletChallenge(challenge: WalletChallenge) {
+    await this.pool.query("DELETE FROM wallet_challenges WHERE expires<$1", [
+      Date.now(),
+    ]);
+    await this.pool.query(
+      "INSERT INTO wallet_challenges VALUES($1,$2,$3,$4,$5,$6)",
+      [
+        challenge.id,
+        challenge.address,
+        challenge.message,
+        challenge.browserHash,
+        challenge.expires,
+        challenge.userId,
+      ],
+    );
+  }
+  async getWalletChallenge(
+    id: string,
+    browserHash: string,
+    now: number,
+  ): Promise<WalletChallenge | undefined> {
+    return (
+      await this.pool.query(
+        'SELECT * FROM wallet_challenges WHERE id=$1 AND "browserHash"=$2 AND expires>$3',
+        [id, browserHash, now],
+      )
+    ).rows[0];
+  }
+  async consumeWalletChallenge(id: string, browserHash: string, now: number) {
+    return (
+      (
+        await this.pool.query(
+          'DELETE FROM wallet_challenges WHERE id=$1 AND "browserHash"=$2 AND expires>$3 RETURNING id',
+          [id, browserHash, now],
+        )
+      ).rowCount === 1
+    );
+  }
+  async walletUser(address: string): Promise<UserRecord | undefined> {
+    return (
+      await this.pool.query(
+        'SELECT users.* FROM users JOIN wallets ON wallets."userId"=users.id WHERE wallets.address=$1',
+        [address],
+      )
+    ).rows[0];
+  }
+  async bindWallet(address: string, user: UserRecord, create: boolean) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (create)
+        await client.query("INSERT INTO users VALUES($1,$2,$3,$4)", [
+          user.id,
+          user.username,
+          user.password,
+          user.createdAt,
+        ]);
+      await client.query("INSERT INTO wallets VALUES($1,$2)", [
+        address,
+        user.id,
+      ]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async addSession(token: string, userId: string, expires: number) {
     await this.pool.query(

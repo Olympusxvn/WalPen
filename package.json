@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "@mysten-incubation/memwal": "0.1.7",
+    "@mysten/dapp-kit-react": "^2.1.37",
+    "@mysten/sui": "^2.33.2",
     "@vercel/functions": "^3.9.9",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",

@@ -1,6 +1,6 @@
 # Dùng thử WalPen cùng bạn bè
 
-Chỉ gửi link thử khi người vận hành đã xác nhận bản cloud hoạt động độc lập với máy cá nhân. Hiện theo dõi trạng thái tại [CLOUD-DEPLOYMENT.md](CLOUD-DEPLOYMENT.md).
+Bản cloud đã chuyển sang Vercel và Neon; API hoạt động sau khi tắt API/tunnel trên máy cá nhân. Theo dõi bằng chứng và giới hạn kiểm thử tại [CLOUD-DEPLOYMENT.md](CLOUD-DEPLOYMENT.md).
 
 ## Tin nhắn mời — tác giả tự gửi
 
@@ -10,7 +10,7 @@ Kèm link https://walpen.vercel.app và mã mời do tác giả cung cấp. Khô
 
 ## Lần đầu
 
-1. Đăng ký tài khoản riêng; chọn EN hoặc VI.
+1. Chọn EN hoặc VI, bấm **Connect Sui wallet**, nhập mã mời ở lần đầu rồi **Approve signature & sign in**. Duyệt thông điệp đăng nhập trong ví; không cần ký giao dịch hay trả gas. Nếu đã có tài khoản mật khẩu, đăng nhập tài khoản cũ rồi liên kết ví trong Settings để giữ nguyên nhật ký.
 2. Trong Settings, thêm khóa API cá nhân và model bạn có quyền dùng. Khóa nằm trong phiên tab; đăng xuất sẽ xóa khỏi phiên của WalPen.
 3. Viết một trang với một chi tiết dễ kiểm chứng, ví dụ: “Mình thích đi bộ buổi sáng, nhưng tuần này chỉ có 15 phút.” Chọn rõ đoạn muốn bot nhớ và cho phép sử dụng đoạn đó.
 4. Lưu, đợi trạng thái xác nhận trên Walrus. Nếu lỗi hoặc chưa xác định kết quả, ghi lại trạng thái; chưa tính là lưu thành công.

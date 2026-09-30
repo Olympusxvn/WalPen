@@ -1833,3 +1833,28 @@ main {
   color: #304737;
   font: inherit;
 }
+.wallet-login {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+}
+.wallet-login p {
+  margin: 0;
+}
+.wallet-invite {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+.wallet-invite input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #d6dace;
+  border-radius: 10px;
+  background: #fffdf8;
+  font: inherit;
+}
+.wallet-address {
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}

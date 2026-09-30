@@ -7,7 +7,28 @@ export type UserRecord = {
   password: string;
   createdAt: string;
 };
+export type WalletChallenge = {
+  id: string;
+  address: string;
+  message: string;
+  browserHash: string;
+  expires: number;
+  userId: string | null;
+};
 export interface Repository {
+  addWalletChallenge(challenge: WalletChallenge): Result<void>;
+  getWalletChallenge(
+    id: string,
+    browserHash: string,
+    now: number,
+  ): Result<WalletChallenge | undefined>;
+  consumeWalletChallenge(
+    id: string,
+    browserHash: string,
+    now: number,
+  ): Result<boolean>;
+  walletUser(address: string): Result<UserRecord | undefined>;
+  bindWallet(address: string, user: UserRecord, create: boolean): Result<void>;
   session(
     token: string,
     now: number,

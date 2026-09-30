@@ -10,6 +10,7 @@ import type { MemoryGateway } from "./memory.ts";
 import type { ChatModel, Source } from "./llm.ts";
 import { LocalModel } from "./llm.ts";
 import { budgetMemoryContext } from "./memory-context.ts";
+import { addWalletAuth } from "./wallet-auth.ts";
 const derive = promisify(scrypt);
 const accountSchema = z.object({
   username: z
@@ -187,6 +188,7 @@ export function createApp(
     await setSession(res, u.id);
     res.json({ user: { id: u.id, username: u.username } });
   });
+  addWalletAuth(app, store, options, authLimiter, session, setSession);
   app.use("/api", async (req, res, next) => {
     const user = await session(req);
     if (!user)

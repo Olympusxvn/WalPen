@@ -4,7 +4,7 @@
 
 ### *A quiet journal. A companion that remembers what you choose.*
 
-English · Tiếng Việt · Walrus Memory · Local Ollama inference
+English · Tiếng Việt · Sui wallet sign-in · Walrus Memory · Cloud AI / local Ollama
 
 [![Walrus Sessions](https://img.shields.io/badge/Walrus_Sessions-Chatbots_That_Remember-456954?style=for-the-badge)](https://thewalrussessions.wal.app/chatbots/index.html)
 [![Stage](https://img.shields.io/badge/Stage-Working_Demo-858b7f?style=for-the-badge)](docs/IMPLEMENTATION-STATUS.md)
@@ -48,9 +48,9 @@ WalPen is a journaling app for people who want continuity between conversations 
 
 **Run on your own computer:** follow [SETUP.md](SETUP.md), then run `npm run setup:local`. It prepares a separate local profile, installs dependencies, downloads the Ollama model and starts WalPen. A journal-only option is available without Ollama; Walrus memory requires your own MemWal credentials.
 
-Cloud migration is being prepared so judges can use the public demo while the developer's computer is off. See [deployment and verification status](docs/CLOUD-DEPLOYMENT.md); the existing deployment description below remains valid until cutover is confirmed.
+**Start with the [live demo](https://walpen.vercel.app).** Choose **VI** or **EN**, connect a Sui wallet and approve the personal sign-in message. Use invitation code `walpen-sessions-2026` on the first visit. Add your Gemini or OpenAI API key in **Settings** to chat. The website and API run on Vercel with persistent state in Neon; the developer's computer can be off. Your provider's model access, quotas and charges apply.
 
-**Start with the [live demo](https://walpen.vercel.app).** Choose **VI** or **EN**, then register using the demo invitation code `walpen-sessions-2026`. The API and Ollama run on the developer's computer; account access and chat require that host and its tunnel to remain online.
+Existing password accounts can sign in using **Existing account / password sign-in**, then link a Sui wallet in Settings. Linking keeps their journal and existing Walrus namespace. See the [friend testing guide](docs/FRIEND-TEST-GUIDE.vi.md) and [deployment evidence](docs/CLOUD-DEPLOYMENT.md).
 
 1. Write a short fictional entry with a fact you can check, such as a planned activity.
 2. Select the excerpt the companion may remember, approve it, save, and wait for **Saved on Walrus**.
@@ -93,11 +93,11 @@ Switching the interface language does not translate or overwrite journal content
 
 ```mermaid
 flowchart TD
-    UI[React interface on Vercel] -->|HTTPS through temporary tunnel| API[Authenticated Node API]
-    API <-->|Journal revisions and job state| DB[Encrypted SQLite cache]
+    UI[React interface on Vercel] -->|HTTPS and signed-wallet session| API[Vercel Node API]
+    API <-->|Journal revisions and job state| DB[Neon encrypted journal cache]
     API -->|Remember and recall in user namespace| MW[MemWal relayer]
     MW <-->|Encrypted memory blobs| WAL[Walrus Mainnet]
-    API -->|Chat and approved recalled excerpts| LLM[Local Ollama / Qwen3]
+    API -->|Chat and approved recalled excerpts| LLM[Gemini or OpenAI with personal key]
     LLM -->|Answer| API
     API -->|Answer and source references| UI
 ```
@@ -108,10 +108,11 @@ flowchart TD
 | [Express API](server/app.ts) | Authentication, server-side user isolation, revision checks and background write handling |
 | [MemWal adapter](server/memory.ts) | `MemWal.create()`, `remember()`, `waitForRememberJob()` and `recall()` |
 | [Context budget](server/memory-context.ts) | Filtered excerpts bounded with SDK helpers before generation |
-| [Ollama adapter](server/llm.ts) | `qwen3:4b-instruct-2507-q4_K_M`, language instructions and citation handling |
-| [SQLite store](server/store.ts) | Encrypted journal payloads, accounts, sessions and recovery state |
+| [Model adapters](server/llm.ts) | Gemini/OpenAI personal keys in cloud; Ollama/Qwen for local use; language instructions and citation handling |
+| [Cloud store](server/postgres-store.ts) / [local store](server/store.ts) | Encrypted journal payloads, accounts, sessions and recovery state |
+| [Wallet sign-in](server/wallet-auth.ts) | Sui personal signatures, browser-bound single-use challenges, linking to existing accounts |
 
-The API derives namespaces from authenticated user IDs. After recall, it validates blob identity, the active revision, consent and the approved excerpt before passing context to Ollama. It checks selected sources again after generation to catch edits or withdrawals made while the model was answering.
+The API derives namespaces from authenticated user IDs. A verified wallet maps to a stable ID; an address supplied by the browser alone cannot authorize recall. After recall, the API validates blob identity, the active revision, consent and the approved excerpt before passing context to the selected model. It checks selected sources again after generation to catch edits or withdrawals made while the model was answering.
 
 The 768-token budget covers the serialized memory context only. It uses MemWal's character-based estimate, not exact Qwen tokenization or a limit on the entire prompt.
 
@@ -140,7 +141,7 @@ ollama pull qwen3:4b-instruct-2507-q4_K_M
 npm run dev
 ```
 
-Ensure Ollama is running. Open **http://localhost:5173** and register with a password of at least 10 characters. This pilot has no password-reset flow.
+Ensure Ollama is running. Open **http://localhost:5173** and use Sui wallet sign-in, or choose the password form to register with at least 10 characters. This pilot has no password-reset flow.
 
 <details>
 <summary><strong>Serve the production build locally</strong></summary>
@@ -176,7 +177,7 @@ Use [.env.example](.env.example) as the starting point. Delegate credentials are
 | `INVITE_CODE` | Optional locally; required in production |
 | `DATABASE_PATH` | Optional; defaults to `data/walpen.sqlite` |
 
-For the documented Ollama setup, leave `LLM_API_KEY` empty. Other provider adapters exist in the code; the recorded demo and evidence use the Qwen/Ollama configuration above.
+For the documented local Ollama setup, leave `LLM_API_KEY` empty. The historical recall evidence below used Qwen/Ollama. The cloud deployment uses personal Gemini/OpenAI keys and does not require Ollama; its server configuration is described in [CLOUD-DEPLOYMENT.md](docs/CLOUD-DEPLOYMENT.md).
 
 <a id="mainnet"></a>
 ## ⛓️ Mainnet evidence
@@ -224,6 +225,7 @@ WalPen adopts two improvements associated with earlier Session 7 feedback and ad
 |:---|:---|
 | [#591](https://github.com/MystenLabs/MemWal/issues/591) / [PR #885](https://github.com/MystenLabs/MemWal/pull/885) | The discussion separated asynchronous write timing from Security Delete behavior. The PR addresses the narrower server-side deletion filter; it does not establish a general stale-after-forget bug. |
 | [#592](https://github.com/MystenLabs/MemWal/issues/592) / [PR #605](https://github.com/MystenLabs/MemWal/pull/605) | SDK token budgeting now bounds WalPen's approved memory context while retaining complete excerpts. |
+| [#277](https://github.com/MystenLabs/MemWal/issues/277), related to #592 | Earlier Special One feedback on serverless latency and bounded recall context. #592 proposes token accounting at the SDK boundary; time budgets and token budgets address different limits. |
 | [#1047](https://github.com/MystenLabs/MemWal/issues/1047) | Historical encryption-backend failures, with job IDs, timing and subsequent recovery evidence. |
 | [#1048](https://github.com/MystenLabs/MemWal/issues/1048) | A durable recovery guide for timeouts and process restarts using existing SDK APIs. |
 | [#1049](https://github.com/MystenLabs/MemWal/issues/1049) | A proposed read-only receipt lookup by idempotency key when the original job ID was lost. |
@@ -250,30 +252,20 @@ Live API checks default to `https://walpen.vercel.app`; set `E2E_BASE_URL` to te
 <a id="deployment"></a>
 ## 🌐 Deployment
 
-**Vercel hosts the frontend.** The Node API, SQLite database and Ollama run on a persistent local host reached through a Cloudflare Quick Tunnel.
+**Vercel hosts the frontend and API.** Neon holds durable application state; MemWal persists and recalls memories on Walrus Mainnet. Personal Gemini/OpenAI keys provide online inference. No local API, Ollama process or tunnel is needed for the public deployment.
 
-1. Test and build locally. Keep Ollama running with the configured model.
-2. Set `APP_MODE=production`, `APP_ORIGIN=https://your-public-domain` and an `INVITE_CODE` in the backend's `.env`; restart the API.
-3. Tunnel to `http://127.0.0.1:3001` and update the `/api/:path*` destination in [vercel.json](vercel.json).
-4. Retain the API `no-store` headers and disabled external-rewrite caching.
-5. Deploy the frontend using Vercel CLI. [.vercelignore](.vercelignore) excludes local secrets, data and backend files.
-6. Check login, a confirmed write and recall from a fresh chat through the public domain.
+1. Connect a Neon database and set the server secrets described in [CLOUD-DEPLOYMENT.md](docs/CLOUD-DEPLOYMENT.md).
+2. Back up and migrate any existing SQLite data with the operator migration script; preserve the original encryption key and user IDs.
+3. Build and deploy using Vercel CLI. [vercel.json](vercel.json) routes `/api/*` to the bundled function; [.vercelignore](.vercelignore) excludes local secrets and data.
+4. Verify a signed-wallet session, confirmed Walrus write and recall in a fresh chat with a valid personal AI key. Record service failures honestly.
 
-For the existing Windows demo, [scripts/start-demo.ps1](scripts/start-demo.ps1) can launch the API and tunnel, update the rewrite and deploy:
-
-```powershell
-.\scripts\start-demo.ps1 -Deploy
-```
-
-This helper expects the official `cloudflared.exe` at `data/tools/cloudflared.exe`, an authenticated Vercel CLI session and the existing `olympusxvns-projects` scope. Adjust that scope for your own deployment. Check existing processes before starting another tunnel.
-
-Quick Tunnel URLs change after restart, so the rewrite must be redeployed. Production cookies require HTTPS; a local HTTP session does not work in production mode. Unattended hosting needs a stable backend host and domain.
+Synchronization uses a database claim before submitting a memory and Vercel `waitUntil()` for bounded background work. Job IDs survive function restarts; journal requests resume pending work. The legacy tunnel helper refuses to overwrite a cloud API configuration.
 
 <a id="privacy"></a>
 ## 🔒 Privacy, consent and recovery
 
-- Journal payloads in SQLite use **AES-256-GCM**. Account/session metadata remains in SQLite; passwords use salted scrypt and production sessions use HttpOnly/SameSite/Secure cookies.
-- The hosted MemWal relayer processes plaintext for embedding and encryption. The local API can decrypt the cache, and Ollama receives the chat input and approved recalled excerpts. This is not end-to-end encryption or a fully offline application.
+- Journal payloads in Neon (cloud) or SQLite (local) use **AES-256-GCM**. Sui sign-in verifies a personal message with a five-minute, single-use, browser-bound challenge. Legacy passwords use salted scrypt; production sessions use HttpOnly/SameSite/Secure cookies.
+- The hosted MemWal relayer processes plaintext for embedding and encryption. The backend can decrypt the cache, and the selected AI provider receives the chat input and approved recalled excerpts. Personal API keys stay in the tab's session storage and pass through the backend for chat; they are not saved to Neon or Walrus. This is not end-to-end encryption or a fully offline application.
 - The pilot uses a shared MemWal account with namespaces derived server-side. This provides application-level user isolation, not independent cryptographic ownership for every user.
 - **Stop remembering** excludes an entry from future prompts and creates a stored revision. It does not delete old Walrus blobs or erase text already returned in a conversation.
 - Recalled content is treated as untrusted data. WalPen has no tool-executing agent; model resistance to malicious text is not a formal guarantee.
@@ -284,7 +276,7 @@ Quick Tunnel URLs change after restart, so the rewrite must be redeployed. Produ
 npm run backup
 ```
 
-Snapshots are stored under `data/backups/`. Keep the database **and** its encryption key, backed up separately. Changing the key without migrating encrypted records makes those records unreadable.
+For local installations, snapshots are stored under `data/backups/`. For cloud, use Neon database backup/export facilities and retain the original encryption key separately. Changing the key without migrating encrypted records makes those records unreadable.
 
 To restore, stop WalPen, point `DATABASE_PATH` to a copy of a snapshot, keep the same `DATA_ENCRYPTION_KEY`, and restart. Test the copy on a separate port before replacing the live database. Snapshots preserve user mappings, current revisions and withdrawn-memory state.
 
@@ -321,13 +313,13 @@ MemWal's `restore` repairs its search index; it does not reconstruct WalPen acco
 <a id="status"></a>
 ## ✅ Project status
 
-- [x] Bilingual journal and locally served Qwen companion.
+- [x] Bilingual journal, online AI with personal keys, and optional local Qwen companion.
 - [x] Confirmed Mainnet writes and fresh-session recall with source references.
 - [x] Consent/revision filtering, memory budgeting and recovery tests.
-- [x] Public frontend and documented local backend setup.
+- [x] Cloud frontend/API, Neon state, and documented local setup.
 - [x] Three new MemWal feedback tickets from the Session 8 build.
 - [ ] Documented real-user feedback beyond synthetic fixtures.
-- [ ] Always-on backend and full recovery from Walrus alone.
+- [ ] Full recovery of application account/consent state from Walrus alone.
 - [ ] Published article/social links, dedicated Sessions wallet and final submission confirmation.
 
 No license file is currently included in this repository.
@@ -340,6 +332,6 @@ No license file is currently included in this repository.
 
 [![GitHub stars](https://img.shields.io/github/stars/Olympusxvn/WalPen?style=social)](https://github.com/Olympusxvn/WalPen/stargazers)
 
-Inspired by Pause & Pen. Built as a new implementation with Walrus Memory and Ollama.
+Inspired by Pause & Pen. Built as a new implementation with Walrus Memory.
 
 </div>
