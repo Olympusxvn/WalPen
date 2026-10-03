@@ -311,7 +311,7 @@ MemWal's `restore` repairs its search index; it does not reconstruct WalPen acco
 | [Recovery documentation ticket](docs/MEMWAL-RECOVERY-DOCS-TICKET.md) | Scope of #1048 |
 | [Receipt lookup ticket](docs/MEMWAL-RECEIPT-LOOKUP-TICKET.md) | Scope of #1049 |
 | [Submission draft](docs/SUBMISSION-DRAFT.md) | Project description and evidence to prepare |
-| [Contribution summary](ISSUE.txt) | Prior core contributions and new Session 8 feedback |
+| [Issues and contributions](ISSUE.md) | Recall backlog, upstream evidence, prior core contributions and Session 8 follow-ups |
 
 <details>
 <summary><strong>Earlier proposals and related resources</strong></summary>
