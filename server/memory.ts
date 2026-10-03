@@ -1,5 +1,12 @@
 import { MemWal } from "@mysten-incubation/memwal";
 import type { Entry } from "./store.ts";
+import {
+  serializeMemory,
+  sameDraft,
+  writeConflict,
+  type WriteDraft,
+  type WriteIntent,
+} from "./write-intent.ts";
 export interface MemoryRecall {
   results: { blob_id: string; text: string; distance?: unknown }[];
   total?: unknown;
@@ -7,8 +14,9 @@ export interface MemoryRecall {
 }
 export interface MemoryGateway {
   configured: boolean;
-  remember(entry: Entry): Promise<string>;
-  wait(userId: string, jobId: string): Promise<string>;
+  prepare(entry: Entry): WriteDraft;
+  remember(entry: Entry, intent: WriteIntent): Promise<string>;
+  wait(userId: string, jobId: string, intent?: WriteIntent): Promise<string>;
   recall(userId: string, query: string): Promise<MemoryRecall>;
 }
 export class WalrusMemory implements MemoryGateway {
@@ -25,26 +33,34 @@ export class WalrusMemory implements MemoryGateway {
       namespace: `walpen-v1-${userId}`,
     });
   }
-  async remember(e: Entry) {
+  prepare(e: Entry): WriteDraft {
+    return {
+      accountId: process.env.MEMWAL_ACCOUNT_ID || "",
+      serverUrl:
+        process.env.MEMWAL_SERVER_URL || "https://relayer.memory.walrus.xyz",
+      namespace: `walpen-v1-${e.userId}`,
+      text: serializeMemory(e),
+    };
+  }
+  async remember(e: Entry, intent: WriteIntent) {
+    if (!sameDraft(this.prepare(e), intent)) throw new Error(writeConflict);
     const result = await this.client(e.userId).remember(
-      JSON.stringify({
-        schema: "walpen/v1",
-        id: e.id,
-        rootId: e.rootId,
-        revision: e.revision,
-        supersedes: e.supersedes,
-        title: e.title,
-        body: e.body,
-        memory: e.memory,
-        mood: e.mood,
-        consent: e.consent,
-        occurredAt: e.occurredAt,
-        recordedAt: e.createdAt,
-      }),
+      intent.text,
+      intent.namespace,
+      { idempotencyKey: intent.key },
     );
     return result.job_id;
   }
-  async wait(userId: string, jobId: string) {
+  async wait(userId: string, jobId: string, intent?: WriteIntent) {
+    if (
+      intent &&
+      (intent.accountId !== process.env.MEMWAL_ACCOUNT_ID ||
+        intent.serverUrl !==
+          (process.env.MEMWAL_SERVER_URL ||
+            "https://relayer.memory.walrus.xyz") ||
+        intent.namespace !== `walpen-v1-${userId}`)
+    )
+      throw new Error(writeConflict);
     const r = await this.client(userId).waitForRememberJob(jobId);
     return r.blob_id;
   }

@@ -32,7 +32,7 @@ try {
   try {
     await client.query("BEGIN");
     await client.query(
-      "LOCK TABLE users,sessions,entries IN ACCESS EXCLUSIVE MODE",
+      "LOCK TABLE users,sessions,entries,write_intents IN ACCESS EXCLUSIVE MODE",
     );
     const existing = (
       await client.query("SELECT COUNT(*)::int AS count FROM users")
@@ -46,6 +46,14 @@ try {
       .prepare("SELECT * FROM sessions WHERE expires>?")
       .all(Date.now()) as any[];
     const entries = copy.prepare("SELECT * FROM entries").all() as any[];
+    const hasIntents = copy
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='write_intents'",
+      )
+      .get();
+    const intents = hasIntents
+      ? (copy.prepare("SELECT * FROM write_intents").all() as any[])
+      : [];
     for (const user of users)
       await client.query(
         'INSERT INTO users(id,username,password,"createdAt") VALUES($1,$2,$3,$4)',
@@ -76,15 +84,32 @@ try {
         ],
       );
     }
+    for (const intent of intents) {
+      decryptPayload(key, intent.payload);
+      await client.query(
+        'INSERT INTO write_intents("entryId","idempotencyKey",payload,attempts,"firstAttemptAt","leaseToken","leaseUntil","nextAttemptAt") VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+        [
+          intent.entryId,
+          intent.idempotencyKey,
+          intent.payload,
+          intent.attempts,
+          intent.firstAttemptAt,
+          intent.leaseToken,
+          intent.leaseUntil,
+          intent.nextAttemptAt,
+        ],
+      );
+    }
     await client.query("COMMIT");
     console.log(
       JSON.stringify({
         users: users.length,
         sessions: sessions.length,
         entries: entries.length,
+        writeIntents: intents.length,
         snapshot,
         preserved:
-          "IDs, namespaces, password hashes, ciphertext, consent, revisions and Walrus receipts",
+          "IDs, namespaces, password hashes, ciphertext, consent, revisions, Walrus receipts and write intents with original retry deadlines",
       }),
     );
   } catch (error) {

@@ -7,6 +7,15 @@ import { PostgresStore } from "../server/postgres-store.ts";
 import { createApp } from "../server/app.ts";
 import type { Entry } from "../server/store.ts";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { serializeMemory } from "../server/write-intent.ts";
+import {
+  recoveryScenarios,
+  journal,
+  DeduplicatingRelayer,
+  recoveryWindow,
+  recoveryStart,
+} from "./recovery-fixtures.ts";
+import { synchronize } from "../server/synchronize.ts";
 
 test("cloud repository preserves sessions, encrypted entries and single-submit claims across instances", async () => {
   if (!process.env.WALPEN_TEST_DATABASE_URL)
@@ -29,6 +38,12 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
     await first.init();
     const memory = {
       configured: false,
+      prepare: (e: Entry) => ({
+        accountId: "fake",
+        serverUrl: "https://fake.invalid",
+        namespace: e.userId,
+        text: serializeMemory(e),
+      }),
       remember: async () => "job",
       wait: async () => "blob",
       recall: async () => ({ results: [] }),
@@ -76,7 +91,24 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
     );
     assert.equal(await second.get(id, "another-user"), undefined);
     assert.deepEqual(
-      (await Promise.all([first.claim(id), second.claim(id)])).sort(),
+      (
+        await Promise.all([
+          first.claim(
+            id,
+            memory.prepare((await first.get(id, userId))!),
+            0,
+            Date.now(),
+          ),
+          second.claim(
+            id,
+            memory.prepare((await second.get(id, userId))!),
+            0,
+            Date.now(),
+          ),
+        ])
+      )
+        .map(Boolean)
+        .sort(),
       [false, true],
     );
     await first.sync(id, "synced", "job-1", "blob-1", null);
@@ -103,10 +135,11 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
     );
     assert.equal((await first.list(userId)).length, 1);
     const active = (await first.list(userId))[0];
-    await first.claim(active.id);
-    await pool.query('UPDATE entries SET "syncStartedAt"=0 WHERE id=$1', [
-      active.id,
-    ]);
+    await first.claim(active.id, memory.prepare(active), 0, Date.now());
+    await pool.query(
+      'UPDATE write_intents SET "leaseUntil"=0 WHERE "entryId"=$1',
+      [active.id],
+    );
     assert.equal((await first.pending(userId)).length, 0);
     assert.equal((await first.get(active.id, userId))?.status, "uncertain");
     const wallet = new Ed25519Keypair();
@@ -141,6 +174,20 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
       .send({})
       .expect(200);
     await request(app1).get("/api/entries").set("Cookie", cookie).expect(401);
+    await recoveryScenarios(first, second);
+    // Fail inside the actual PostgreSQL transaction, after locking the entry.
+    const fixture = journal(userId);
+    await first.insert(fixture);
+    const remote = new DeduplicatingRelayer();
+    await pool.query(
+      `CREATE FUNCTION fail_intent() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test failure'; END; $$; CREATE TRIGGER fail_intent BEFORE INSERT ON write_intents FOR EACH ROW EXECUTE FUNCTION fail_intent()`,
+    );
+    await assert.rejects(
+      synchronize(first, remote, fixture, recoveryWindow, recoveryStart),
+    );
+    assert.equal((await second.get(fixture.id, userId))!.status, "queued");
+    assert.equal(await second.writeIntent(fixture.id), undefined);
+    assert.equal(remote.jobs.size, 0);
   } finally {
     await pool.end();
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`);

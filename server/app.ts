@@ -17,6 +17,8 @@ import {
   selectRecallContext,
 } from "./recall.ts";
 import { recallNotices } from "../shared/recall.ts";
+import { retryWindow } from "./write-intent.ts";
+import { synchronize } from "./synchronize.ts";
 const derive = promisify(scrypt);
 const accountSchema = z.object({
   username: z
@@ -55,9 +57,17 @@ export function createApp(
     background?: (work: Promise<unknown>) => void;
     trustProxy?: number | string;
     recallMaxDistance?: number | null;
+    idempotencyRetryWindowMs?: number;
   } = {},
 ) {
   const app = express();
+  const writeWindow = retryWindow(
+    String(
+      options.idempotencyRetryWindowMs ??
+        process.env.MEMWAL_IDEMPOTENCY_RETRY_WINDOW_MS ??
+        0,
+    ),
+  );
   const maxDistance =
     options.recallMaxDistance === null
       ? null
@@ -240,30 +250,8 @@ export function createApp(
   async function sync(e: Entry) {
     if (running.has(e.id) || !memory.configured) return;
     running.add(e.id);
-    let jobId = e.jobId;
     try {
-      // Persist an ambiguous state BEFORE a network write. A crash can never blindly resubmit it.
-      if (!jobId) {
-        if (!(await store.claim(e.id))) return;
-        jobId = await memory.remember(e);
-        await store.sync(e.id, "pending", jobId, null, null);
-      }
-      const blob = await memory.wait(e.userId, jobId);
-      await store.sync(e.id, "synced", jobId, blob, null);
-    } catch (err) {
-      const failed =
-        err instanceof Error && err.message.startsWith("remember job failed:");
-      await store.sync(
-        e.id,
-        failed ? "failed" : jobId ? "pending" : "uncertain",
-        jobId,
-        null,
-        failed
-          ? "Walrus báo job thất bại. Bản cục bộ còn nguyên; cần kiểm tra job trước khi lưu lại."
-          : jobId
-            ? "Walrus chưa xác nhận hoàn tất. Bạn có thể kiểm tra lại job hiện tại."
-            : "Chưa xác định yêu cầu đã được tiếp nhận. Không tự động gửi lại để tránh bản sao.",
-      );
+      await synchronize(store, memory, e, writeWindow);
     } finally {
       running.delete(e.id);
     }
@@ -312,6 +300,15 @@ export function createApp(
     if (!e) return res.status(404).json({ error: "Không tìm thấy trang này." });
     if (e.status === "uncertain") {
       if (running.has(e.id)) return res.json({ entry: safe(e) });
+      if (
+        e.jobId ||
+        (await store.pending(e.userId, writeWindow)).some(
+          (row) => row.id === e.id,
+        )
+      ) {
+        background(sync(e));
+        return res.json({ entry: safe(e) });
+      }
       try {
         const found = (await memory.recall(e.userId, e.id)).results.find(
           (r) => {
@@ -526,7 +523,7 @@ export function createApp(
   );
   async function resume(userId?: string) {
     await Promise.all(
-      (await store.pending(userId)).map((entry) => sync(entry)),
+      (await store.pending(userId, writeWindow)).map((entry) => sync(entry)),
     );
   }
   return { app, resume };

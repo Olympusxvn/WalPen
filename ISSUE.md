@@ -16,6 +16,14 @@ See [configuration, diagnostics and evaluation](docs/RECALL-EVALUATION.md) for r
 
 Relevance filtering cannot recover an eligible memory outside the returned top-k. Native metadata filtering is tracked upstream in [#434](https://github.com/MystenLabs/MemWal/issues/434) and [#292](https://github.com/MystenLabs/MemWal/issues/292); [#1066](https://github.com/MystenLabs/MemWal/issues/1066) concerns information lost after distance filtering. These are related work, not additional WalPen reports.
 
+## WalPen write recovery
+
+**[WalPen #2 — Persist per-revision idempotency keys for recoverable MemWal writes](https://github.com/Olympusxvn/WalPen/issues/2)** · Implemented
+
+Neon and SQLite commit an encrypted frozen intent and per-revision key before the SDK call. Database leases coordinate instances; acceptance and completion persist the job ID and blob receipt. Recovery polls known jobs and permits bounded same-key replay only within an operator-verified window. The default remains `0` (no ambiguous replay), because the hosted relayer's build/retention contract could not be established. Retired revisions and legacy uncertain writes without keys are not resubmitted.
+
+Deterministic tests cover response loss, database failures, concurrent instances, stale workers, revision/user isolation and backup restoration; the same recovery scenarios passed on Neon in an isolated schema using a fake relayer. See [implementation, contract evidence and limits](docs/WRITE-RECOVERY.md). No new Mainnet write or upstream feature is claimed.
+
 ## Evidence added to existing upstream discussions
 
 One follow-up comment was published to each thread on 3 October 2026.
@@ -45,7 +53,7 @@ All three issues were **open**, with only the automated acknowledgment and no hu
 | [#1048 — Durable recovery recipe](https://github.com/MystenLabs/MemWal/issues/1048)           | Documentation for timeouts/restarts, persisted job state and uncertain outcomes.                                                               | Recovery guidance or an example that distinguishes polling an accepted job from submitting another write. |
 | [#1049 — Receipt lookup by idempotency key](https://github.com/MystenLabs/MemWal/issues/1049) | Read-only receipt lookup when the caller retains a key but loses the job-ID response.                                                          | An API proposal or implementation covering missing, pending, completed and failed receipts.               |
 
-The SDK already supports caller-supplied idempotency keys and job-ID status lookup. #1049 requests the missing lookup path; it is not a request to add idempotent writes again. WalPen's current adapter does not persist/pass its own idempotency key and retains an uncertain state when it cannot establish the result.
+The SDK already supports caller-supplied idempotency keys and job-ID status lookup. #1049 requests the missing lookup path; it is not a request to add idempotent writes again. WalPen now persists and passes its own per-revision key through #2. Unverified or expired recovery conditions retain uncertainty.
 
 A Codex follow-up is configured for **09:00 daily, Asia/Bangkok (UTC+7)**. It checks these three threads and linked fixes, reports meaningful changes, and stays quiet for unchanged state or routine bot acknowledgments. It does not post replies or change this repository automatically. The last-seen state is kept locally outside version control; this document remains a dated record.
 

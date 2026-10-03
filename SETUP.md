@@ -1,6 +1,6 @@
 # WalPen — setup for judges and guests
 
-Updated 30 September 2026. Use the hosted application or run an independent local installation. Production runs on Vercel and Neon; it no longer depends on the developer's computer or a temporary tunnel.
+Updated 3 October 2026. Use the hosted application or run an independent local installation. Production runs on Vercel and Neon; it no longer depends on the developer's computer or a temporary tunnel.
 
 The local section also serves as an execution runbook for an AI coding agent: **“Read SETUP.md and set up WalPen locally.”** It is a repository guide, not an automatically installed Codex/Cursor skill.
 
@@ -104,7 +104,8 @@ The local profile uses port **3002**, binds to loopback, and does not load the r
 - **Slow chat:** keep Ollama running and allow the first model load to finish. The app has a 120-second model request timeout; a successful model download does not guarantee a response fits that time on every machine.
 - **Journal-only → chat:** set `LLM_PROVIDER=ollama`, then run setup again to prepare the model.
 - **Back up:** stop WalPen, then copy the entire `data/local/` folder to a private location. Keep the original key and database together. A lost key cannot decrypt the old database; setup refuses to generate a replacement beside an existing database.
-- **Write timeout:** retain the database and key. An uncertain write may have reached Walrus; do not blindly resubmit it as a new entry. Consult [write recovery notes](docs/MEMWAL-PR-INTEGRATION.md).
+- **Write timeout:** retain the database and encryption key. WalPen persists a per-revision idempotency key and frozen request before sending, then saves the job ID before polling. Use **Check storage** for an accepted job. An uncertain write may already have reached Walrus; do not recreate it as a new entry. `MEMWAL_IDEMPOTENCY_RETRY_WINDOW_MS=0` keeps ambiguous replay off by default. Enable a bounded window only after verifying the relayer's deduplication and retention contract; see [write recovery, migration and tests](docs/WRITE-RECOVERY.md).
+- **Recovery backup:** keep the entire database, including `write_intents`, with its original encryption key. Startup upgrades the schema automatically; it does not replay legacy ambiguous writes without a persisted key. Stop the old service before restoring or migrating to avoid independent copies processing the same backlog.
 
 ## AI agent execution instructions
 

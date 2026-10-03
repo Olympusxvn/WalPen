@@ -244,6 +244,10 @@ export const english: Record<string, string> = {
     "The model hasn't returned an answer. Try again shortly.",
   "Tiến trình trước đã dừng trong khi gửi. Hãy đối soát trước khi thử lại.":
     "The previous process stopped during submission. Reconcile before retrying.",
+  "Chưa xác nhận lần lưu trước. Dữ liệu vẫn được giữ; chỉ thử lại khi đủ điều kiện chống trùng.":
+    "The previous save is unconfirmed. Your data is retained; retry requires verified duplicate protection.",
+  "Nội dung hoặc đích lưu đã thay đổi. Cần đối soát lần lưu trước trước khi tiếp tục.":
+    "The content or storage destination changed. Reconcile the previous save before continuing.",
 };
 export const vietnamese: Record<string, string> = {
   "A LITTLE ROOM FOR YOURSELF": "MỘT KHOẢNG LẶNG CHO RIÊNG MÌNH",

@@ -4,6 +4,12 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Repository, UserRecord, WalletChallenge } from "./repository.ts";
 import { encryptPayload, decryptPayload } from "./encryption.ts";
+import {
+  decodeLease,
+  nextLease,
+  writeUncertain,
+  type WriteDraft,
+} from "./write-intent.ts";
 
 export interface Entry {
   id: string;
@@ -39,12 +45,13 @@ export class Store implements Repository {
       CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, createdAt TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, userId TEXT NOT NULL REFERENCES users(id), rootId TEXT NOT NULL, revision INTEGER NOT NULL, supersedes TEXT, payload TEXT NOT NULL, createdAt TEXT NOT NULL, status TEXT NOT NULL, jobId TEXT, blobId TEXT, error TEXT, retired INTEGER NOT NULL DEFAULT 0);
-      CREATE INDEX IF NOT EXISTS entries_user ON entries(userId, retired, createdAt);`);
+      CREATE INDEX IF NOT EXISTS entries_user ON entries(userId, retired, createdAt);
+      CREATE TABLE IF NOT EXISTS write_intents(entryId TEXT PRIMARY KEY REFERENCES entries(id), idempotencyKey TEXT UNIQUE NOT NULL, payload TEXT NOT NULL, attempts INTEGER NOT NULL, firstAttemptAt INTEGER NOT NULL, leaseToken TEXT NOT NULL, leaseUntil INTEGER NOT NULL, nextAttemptAt INTEGER NOT NULL);`);
     this.db
       .exec(`CREATE TABLE IF NOT EXISTS wallets(address TEXT PRIMARY KEY, userId TEXT UNIQUE NOT NULL REFERENCES users(id));
       CREATE TABLE IF NOT EXISTS wallet_challenges(id TEXT PRIMARY KEY,address TEXT NOT NULL,message TEXT NOT NULL,browserHash TEXT NOT NULL,expires INTEGER NOT NULL,userId TEXT);`);
     this.db.exec(
-      "UPDATE entries SET status='uncertain', error='Tiến trình trước đã dừng trong khi gửi. Hãy đối soát trước khi thử lại.' WHERE status='submitting'",
+      "UPDATE entries SET status='uncertain', error='Tiến trình trước đã dừng trong khi gửi. Hãy đối soát trước khi thử lại.' WHERE status='submitting' AND NOT EXISTS (SELECT 1 FROM write_intents WHERE entryId=entries.id)",
     );
   }
   encrypt(value: unknown) {
@@ -148,23 +155,68 @@ export class Store implements Repository {
       .prepare("INSERT INTO users VALUES(?,?,?,?)")
       .run(user.id, user.username, user.password, user.createdAt);
   }
-  claim(id: string) {
-    return (
-      Number(
-        this.db
-          .prepare(
-            "UPDATE entries SET status='submitting' WHERE id=? AND status='queued' AND jobId IS NULL",
-          )
-          .run(id).changes,
-      ) === 1
+  writeIntent(id: string) {
+    return decodeLease(
+      this.db.prepare("SELECT * FROM write_intents WHERE entryId=?").get(id),
+      (p) => this.decrypt(p),
     );
   }
-  pending(userId?: string): Entry[] {
+  claim(id: string, draft: WriteDraft, windowMs: number, now: number) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db.prepare("SELECT * FROM entries WHERE id=?").get(id);
+      const lease =
+        row &&
+        nextLease(this.decode(row), this.writeIntent(id), draft, windowMs, now);
+      if (lease) {
+        this.db
+          .prepare(
+            `INSERT INTO write_intents VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(entryId) DO UPDATE SET attempts=excluded.attempts, leaseToken=excluded.leaseToken, leaseUntil=excluded.leaseUntil, nextAttemptAt=excluded.nextAttemptAt`,
+          )
+          .run(
+            id,
+            lease.intent.key,
+            this.encrypt(lease.intent),
+            lease.attempts,
+            lease.firstAttemptAt,
+            lease.token,
+            lease.leaseUntil,
+            lease.nextAttemptAt,
+          );
+        this.db
+          .prepare(
+            "UPDATE entries SET status='submitting',error=NULL WHERE id=?",
+          )
+          .run(id);
+      }
+      this.db.exec("COMMIT");
+      return lease;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  pending(userId?: string, windowMs = 0, now = Date.now()): Entry[] {
+    this.db
+      .prepare(
+        `UPDATE entries SET status='uncertain',error=? WHERE status='submitting' AND EXISTS (SELECT 1 FROM write_intents w WHERE w.entryId=entries.id AND w.leaseUntil<=?)`,
+      )
+      .run(writeUncertain, now);
     return this.db
-      .prepare("SELECT * FROM entries WHERE status IN ('queued','pending')")
-      .all()
-      .map((r) => this.decode(r))
-      .filter((entry) => !userId || entry.userId === userId);
+      .prepare(
+        `SELECT e.* FROM entries e LEFT JOIN write_intents w ON w.entryId=e.id WHERE (? IS NULL OR e.userId=?) AND ((e.jobId IS NOT NULL AND e.status IN ('pending','uncertain','submitting')) OR (e.retired=0 AND e.jobId IS NULL AND ((e.status='queued' AND w.entryId IS NULL) OR (e.status IN ('queued','uncertain','submitting') AND ?>0 AND w.attempts<3 AND w.firstAttemptAt<=? AND w.firstAttemptAt+?>? AND w.leaseUntil<=? AND w.nextAttemptAt<=?)))) ORDER BY e.createdAt LIMIT 20`,
+      )
+      .all(
+        userId ?? null,
+        userId ?? null,
+        windowMs,
+        now,
+        windowMs,
+        now,
+        now,
+        now,
+      )
+      .map((r) => this.decode(r));
   }
   insert(e: Entry) {
     this.db.exec("BEGIN IMMEDIATE");
@@ -215,11 +267,26 @@ export class Store implements Repository {
     jobId: string | null,
     blobId: string | null,
     error: string | null,
+    leaseToken?: string,
   ) {
-    this.db
-      .prepare(
-        "UPDATE entries SET status=?,jobId=?,blobId=?,error=? WHERE id=?",
-      )
-      .run(status, jobId, blobId, error, id);
+    return (
+      Number(
+        this.db
+          .prepare(
+            `UPDATE entries SET status=?,jobId=COALESCE(jobId,?),blobId=COALESCE(blobId,?),error=? WHERE id=? AND status!='synced' AND (status!='failed' OR ?='synced') AND (jobId IS NULL OR jobId=?) AND (? IS NULL OR EXISTS (SELECT 1 FROM write_intents w WHERE w.entryId=entries.id AND w.leaseToken=?))`,
+          )
+          .run(
+            status,
+            jobId,
+            blobId,
+            error,
+            id,
+            status,
+            jobId,
+            leaseToken ?? null,
+            leaseToken ?? null,
+          ).changes,
+      ) === 1
+    );
   }
 }

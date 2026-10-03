@@ -10,6 +10,9 @@ function setup() {
   const store = new Store(":memory:", randomBytes(32));
   const memory = {
     configured: false,
+    prepare: () => {
+      throw new Error("Memory disabled");
+    },
     remember: async () => "job",
     wait: async () => "blob",
     recall: async () => ({ results: [] }),

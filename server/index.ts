@@ -33,8 +33,15 @@ if (existsSync("dist/index.html")) {
   app.get("/{*path}", (_req, res) => res.sendFile(resolve("dist/index.html")));
 }
 const port = Number(process.env.PORT) || 3001;
+function resumeSafely() {
+  void resume().catch(() =>
+    console.error(
+      "Background synchronization could not finish; durable state retained.",
+    ),
+  );
+}
 app.listen(port, process.env.HOST || "127.0.0.1", () => {
   console.log(`WalPen ready at http://localhost:${port}`);
-  resume();
+  resumeSafely();
 });
-setInterval(resume, 60000).unref();
+setInterval(resumeSafely, 60000).unref();

@@ -84,6 +84,7 @@ test("local launcher isolates production configuration and derives safe bind/ori
     PATH: "keep",
     MEMWAL_PRIVATE_KEY: "production-secret",
     MEMWAL_ACCOUNT_ID: "production-account",
+    MEMWAL_IDEMPOTENCY_RETRY_WINDOW_MS: "3600000",
     LLM_API_KEY: "production-token",
     APP_ORIGIN: "https://walpen.vercel.app",
     APP_MODE: "production",
@@ -99,6 +100,7 @@ test("local launcher isolates production configuration and derives safe bind/ori
   assert.equal(env.PATH, "keep");
   assert.equal(env.MEMWAL_PRIVATE_KEY, "");
   assert.equal(env.MEMWAL_ACCOUNT_ID, "");
+  assert.equal(env.MEMWAL_IDEMPOTENCY_RETRY_WINDOW_MS, "0");
   assert.equal(env.LLM_API_KEY, "");
   assert.equal(env.APP_MODE, "development");
   assert.equal(env.NODE_ENV, "development");

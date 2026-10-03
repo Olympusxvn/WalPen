@@ -1,4 +1,5 @@
 import type { Entry } from "./store.ts";
+import type { WriteDraft, WriteLease } from "./write-intent.ts";
 
 type Result<T> = T | Promise<T>;
 export type UserRecord = {
@@ -39,14 +40,21 @@ export interface Repository {
   addUser(user: UserRecord): Result<void>;
   get(id: string, userId: string): Result<Entry | undefined>;
   list(userId: string, all?: boolean): Result<Entry[]>;
-  pending(userId?: string): Result<Entry[]>;
+  pending(userId?: string, windowMs?: number, now?: number): Result<Entry[]>;
   insert(entry: Entry): Result<void>;
-  claim(id: string): Result<boolean>;
+  claim(
+    id: string,
+    draft: WriteDraft,
+    windowMs: number,
+    now: number,
+  ): Result<WriteLease | undefined>;
+  writeIntent(id: string): Result<WriteLease | undefined>;
   sync(
     id: string,
     status: string,
     jobId: string | null,
     blobId: string | null,
     error: string | null,
-  ): Result<void>;
+    leaseToken?: string,
+  ): Result<boolean>;
 }

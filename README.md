@@ -289,6 +289,8 @@ npm run backup
 
 For local installations, snapshots are stored under `data/backups/`. For cloud, use Neon database backup/export facilities and retain the original encryption key separately. Changing the key without migrating encrypted records makes those records unreadable.
 
+MemWal writes now persist an encrypted request and stable per-revision idempotency key before submission. Database leases coordinate Vercel instances; known jobs resume polling and confirmed receipts cannot be downgraded. Keep the `write_intents` table in backups. Ambiguous replay defaults to off (`MEMWAL_IDEMPOTENCY_RETRY_WINDOW_MS=0`) until the relayer's deduplication/retention contract is verified. See [write recovery and test evidence](docs/WRITE-RECOVERY.md).
+
 To restore a **local SQLite installation**, stop WalPen, point `DATABASE_PATH` to a copy of a snapshot, keep the same `DATA_ENCRYPTION_KEY`, and restart. Test the copy on a separate port before replacing the live database. Snapshots preserve user mappings, current revisions and withdrawn-memory state. This procedure does not restore the production Neon database.
 
 MemWal's `restore` repairs its search index; it does not reconstruct WalPen accounts or the local database. Full recovery from Walrus alone is not implemented. JSON/Markdown exports preserve readable journal content, not the complete account state.

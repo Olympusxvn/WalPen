@@ -9,12 +9,21 @@ import { Store, type Entry } from "../server/store.ts";
 import { createApp } from "../server/app.ts";
 import type { MemoryGateway, MemoryRecall } from "../server/memory.ts";
 import type { Source } from "../server/llm.ts";
+import { serializeMemory } from "../server/write-intent.ts";
 class FakeMemory implements MemoryGateway {
   configured = true;
   writes: Entry[] = [];
   failWrite = false;
   failWait = false;
   failRecall = false;
+  prepare(e: Entry) {
+    return {
+      accountId: "test",
+      serverUrl: "https://fake.invalid",
+      namespace: e.userId,
+      text: serializeMemory(e),
+    };
+  }
   async remember(e: Entry) {
     if (this.failWrite) throw new Error("network");
     this.writes.push(e);
@@ -111,6 +120,19 @@ test("sessions persist across clients; data is encrypted; user isolation include
   const saved = await a.post("/api/entries").send(entry()).expect(202);
   await tick();
   const id = saved.body.entry.id;
+  const intent = s.store.writeIntent(id)!;
+  assert.ok(intent.intent.key);
+  for (const response of [
+    saved,
+    await a.get("/api/entries"),
+    await a.get("/api/export"),
+  ]) {
+    const json = JSON.stringify(response.body);
+    assert.ok(!json.includes(intent.intent.key));
+    assert.ok(!json.includes(intent.token));
+    assert.ok(!json.includes("firstAttemptAt"));
+    assert.ok(!json.includes("idempotencyKey"));
+  }
   assert.equal((await b.get("/api/entries")).body.entries.length, 0);
   await b.post(`/api/entries/${id}/forget`).send({}).expect(404);
   await b

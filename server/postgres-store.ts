@@ -2,6 +2,12 @@ import { Pool } from "pg";
 import type { Entry } from "./store.ts";
 import type { Repository, UserRecord, WalletChallenge } from "./repository.ts";
 import { encryptPayload, decryptPayload } from "./encryption.ts";
+import {
+  decodeLease,
+  nextLease,
+  writeUncertain,
+  type WriteDraft,
+} from "./write-intent.ts";
 
 /** Persistent cloud state; journal payloads use the same encryption as local SQLite. */
 export class PostgresStore implements Repository {
@@ -21,6 +27,7 @@ export class PostgresStore implements Repository {
       CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, "userId" TEXT NOT NULL REFERENCES users(id), expires BIGINT NOT NULL);
       CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, "userId" TEXT NOT NULL REFERENCES users(id), "rootId" TEXT NOT NULL, revision INTEGER NOT NULL, supersedes TEXT, payload TEXT NOT NULL, "createdAt" TEXT NOT NULL, status TEXT NOT NULL, "jobId" TEXT, "blobId" TEXT, error TEXT, retired INTEGER NOT NULL DEFAULT 0, "syncStartedAt" BIGINT);
       CREATE INDEX IF NOT EXISTS entries_user ON entries("userId", retired, "createdAt");
+      CREATE TABLE IF NOT EXISTS write_intents("entryId" TEXT PRIMARY KEY REFERENCES entries(id), "idempotencyKey" TEXT UNIQUE NOT NULL, payload TEXT NOT NULL, attempts INTEGER NOT NULL, "firstAttemptAt" BIGINT NOT NULL, "leaseToken" TEXT NOT NULL, "leaseUntil" BIGINT NOT NULL, "nextAttemptAt" BIGINT NOT NULL);
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
       CREATE TABLE IF NOT EXISTS wallets(address TEXT PRIMARY KEY, "userId" TEXT UNIQUE NOT NULL REFERENCES users(id));
       CREATE TABLE IF NOT EXISTS wallet_challenges(id TEXT PRIMARY KEY,address TEXT NOT NULL,message TEXT NOT NULL,"browserHash" TEXT NOT NULL,expires BIGINT NOT NULL,"userId" TEXT);
@@ -157,25 +164,77 @@ export class PostgresStore implements Repository {
       )
     ).rows.map((row) => this.decode(row));
   }
-  async pending(userId?: string): Promise<Entry[]> {
-    // A lost submission is ambiguous, never an invitation to write it again.
+  async pending(
+    userId?: string,
+    windowMs = 0,
+    now = Date.now(),
+  ): Promise<Entry[]> {
     await this.pool.query(
-      `UPDATE entries SET status='uncertain', error='Previous submission did not confirm a job. Reconcile before retrying.' WHERE status='submitting' AND "syncStartedAt"<$1`,
-      [Date.now() - 10 * 60 * 1000],
+      `UPDATE entries e SET status='uncertain', error=$3 WHERE status='submitting' AND (EXISTS (SELECT 1 FROM write_intents w WHERE w."entryId"=e.id AND w."leaseUntil"<=$1) OR (NOT EXISTS (SELECT 1 FROM write_intents w WHERE w."entryId"=e.id) AND ("syncStartedAt" IS NULL OR "syncStartedAt"<$2)))`,
+      [now, now - 10 * 60 * 1000, writeUncertain],
     );
     return (
       await this.pool.query(
-        `SELECT * FROM entries WHERE status IN ('queued','pending') ${userId ? 'AND "userId"=$1' : ""} ORDER BY "createdAt" LIMIT 20`,
-        userId ? [userId] : [],
+        `SELECT e.* FROM entries e LEFT JOIN write_intents w ON w."entryId"=e.id WHERE ($1::text IS NULL OR e."userId"=$1) AND ((e."jobId" IS NOT NULL AND e.status IN ('pending','uncertain','submitting')) OR (e.retired=0 AND e."jobId" IS NULL AND ((e.status='queued' AND w."entryId" IS NULL) OR (e.status IN ('queued','uncertain','submitting') AND $2::bigint>0 AND w.attempts<3 AND w."firstAttemptAt"<=$3 AND w."firstAttemptAt"+$2>$3 AND w."leaseUntil"<=$3 AND w."nextAttemptAt"<=$3)))) ORDER BY e."createdAt" LIMIT 20`,
+        [userId ?? null, windowMs, now],
       )
     ).rows.map((row) => this.decode(row));
   }
-  async claim(id: string) {
-    const result = await this.pool.query(
-      `UPDATE entries SET status='submitting', "syncStartedAt"=$2 WHERE id=$1 AND status='queued' AND "jobId" IS NULL RETURNING id`,
-      [id, Date.now()],
+  async writeIntent(id: string) {
+    return decodeLease(
+      (
+        await this.pool.query(
+          'SELECT * FROM write_intents WHERE "entryId"=$1',
+          [id],
+        )
+      ).rows[0],
+      (p) => decryptPayload(this.key, p),
     );
-    return result.rowCount === 1;
+  }
+  async claim(id: string, draft: WriteDraft, windowMs: number, now: number) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const row = (
+        await client.query("SELECT * FROM entries WHERE id=$1 FOR UPDATE", [id])
+      ).rows[0];
+      const old = decodeLease(
+        (
+          await client.query('SELECT * FROM write_intents WHERE "entryId"=$1', [
+            id,
+          ])
+        ).rows[0],
+        (p) => decryptPayload(this.key, p),
+      );
+      const lease =
+        row && nextLease(this.decode(row), old, draft, windowMs, now);
+      if (lease) {
+        await client.query(
+          `INSERT INTO write_intents VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT("entryId") DO UPDATE SET attempts=EXCLUDED.attempts,"leaseToken"=EXCLUDED."leaseToken","leaseUntil"=EXCLUDED."leaseUntil","nextAttemptAt"=EXCLUDED."nextAttemptAt"`,
+          [
+            id,
+            lease.intent.key,
+            encryptPayload(this.key, lease.intent),
+            lease.attempts,
+            lease.firstAttemptAt,
+            lease.token,
+            lease.leaseUntil,
+            lease.nextAttemptAt,
+          ],
+        );
+        await client.query(
+          `UPDATE entries SET status='submitting',error=NULL,"syncStartedAt"=$2 WHERE id=$1`,
+          [id, now],
+        );
+      }
+      await client.query("COMMIT");
+      return lease;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   async insert(entry: Entry) {
     const client = await this.pool.connect();
@@ -227,11 +286,16 @@ export class PostgresStore implements Repository {
     jobId: string | null,
     blobId: string | null,
     error: string | null,
+    leaseToken?: string,
   ) {
     // Concurrent polls must not downgrade an already confirmed receipt.
-    await this.pool.query(
-      `UPDATE entries SET status=$2,"jobId"=$3,"blobId"=$4,error=$5 WHERE id=$1 AND (status!='synced' OR $2='synced')`,
-      [id, status, jobId, blobId, error],
+    return (
+      (
+        await this.pool.query(
+          `UPDATE entries SET status=$2,"jobId"=COALESCE("jobId",$3),"blobId"=COALESCE("blobId",$4),error=$5 WHERE id=$1 AND status!='synced' AND (status!='failed' OR $2='synced') AND ("jobId" IS NULL OR "jobId"=$3) AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM write_intents w WHERE w."entryId"=entries.id AND w."leaseToken"=$6))`,
+          [id, status, jobId, blobId, error, leaseToken ?? null],
+        )
+      ).rowCount === 1
     );
   }
 }

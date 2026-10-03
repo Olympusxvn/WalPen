@@ -2,6 +2,14 @@
 
 Notable changes to WalPen are recorded here. Dates use `YYYY-MM-DD`.
 
+## 2026-10-03 — Durable per-revision MemWal writes
+
+- Addressed [WalPen #2](https://github.com/Olympusxvn/WalPen/issues/2): commit an opaque idempotency key and encrypted frozen request in Neon/SQLite before sending. Retries retain the same key, account, namespace and exact text; new revisions receive distinct keys.
+- Added database submission leases, fenced result updates, immediate job/receipt persistence and monotonic success. Known jobs resume polling; retired revisions and legacy uncertain writes without keys are never freshly submitted during recovery.
+- Added bounded same-key recovery through `MEMWAL_IDEMPOTENCY_RETRY_WINDOW_MS`. It defaults to `0` because the hosted relayer's build and retention contract were not established. No universal exactly-once guarantee is claimed.
+- Preserved intents and original deadlines through SQLite backups and cloud migration. Added EN/VI recovery messages and [operator guidance](docs/WRITE-RECOVERY.md).
+- Verified lost responses, restarts, database failures and concurrent workers with a deduplicating fake relayer, local SQLite and an isolated real Neon schema. Tests made no Mainnet writes.
+
 ## 2026-10-03 — Recall relevance and diagnostics
 
 - Added the server setting `MEMWAL_RECALL_MAX_DISTANCE` (provisional default `0.7`) with strict distance filtering after current-revision and consent checks. Missing or invalid scores are excluded.
