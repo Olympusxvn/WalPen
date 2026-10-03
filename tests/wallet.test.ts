@@ -12,7 +12,7 @@ function setup() {
     configured: false,
     remember: async () => "job",
     wait: async () => "blob",
-    recall: async () => [],
+    recall: async () => ({ results: [] }),
   };
   const model = {
     configured: false,

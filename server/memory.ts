@@ -1,13 +1,15 @@
 import { MemWal } from "@mysten-incubation/memwal";
 import type { Entry } from "./store.ts";
+export interface MemoryRecall {
+  results: { blob_id: string; text: string; distance?: unknown }[];
+  total?: unknown;
+  dropped_count?: unknown;
+}
 export interface MemoryGateway {
   configured: boolean;
   remember(entry: Entry): Promise<string>;
   wait(userId: string, jobId: string): Promise<string>;
-  recall(
-    userId: string,
-    query: string,
-  ): Promise<{ blob_id: string; text: string }[]>;
+  recall(userId: string, query: string): Promise<MemoryRecall>;
 }
 export class WalrusMemory implements MemoryGateway {
   configured = !!(
@@ -48,6 +50,12 @@ export class WalrusMemory implements MemoryGateway {
   }
   async recall(userId: string, query: string) {
     const r = await this.client(userId).recall({ query, limit: 20 });
-    return r.results;
+    // Keep response metadata and raw distances. Filtering here would lose counts
+    // before authorization; SDK maxDistance also rewrites total (MemWal #1066).
+    return {
+      results: r.results,
+      total: r.total,
+      dropped_count: r.dropped_count,
+    };
   }
 }

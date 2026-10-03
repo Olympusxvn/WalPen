@@ -31,7 +31,7 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
       configured: false,
       remember: async () => "job",
       wait: async () => "blob",
-      recall: async () => [],
+      recall: async () => ({ results: [] }),
     };
     const model = {
       configured: false,

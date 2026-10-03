@@ -11,6 +11,12 @@ import type { ChatModel, Source } from "./llm.ts";
 import { LocalModel } from "./llm.ts";
 import { budgetMemoryContext } from "./memory-context.ts";
 import { addWalletAuth } from "./wallet-auth.ts";
+import {
+  emptyRecallDiagnostics,
+  recallMaxDistance,
+  selectRecallContext,
+} from "./recall.ts";
+import { recallNotices } from "../shared/recall.ts";
 const derive = promisify(scrypt);
 const accountSchema = z.object({
   username: z
@@ -48,9 +54,18 @@ export function createApp(
     inviteCode?: string;
     background?: (work: Promise<unknown>) => void;
     trustProxy?: number | string;
+    recallMaxDistance?: number | null;
   } = {},
 ) {
   const app = express();
+  const maxDistance =
+    options.recallMaxDistance === null
+      ? null
+      : recallMaxDistance(
+          options.recallMaxDistance === undefined
+            ? process.env.MEMWAL_RECALL_MAX_DISTANCE
+            : String(options.recallMaxDistance),
+        );
   app.disable("x-powered-by");
   if (options.production)
     app.set("trust proxy", options.trustProxy ?? "loopback");
@@ -298,19 +313,21 @@ export function createApp(
     if (e.status === "uncertain") {
       if (running.has(e.id)) return res.json({ entry: safe(e) });
       try {
-        const found = (await memory.recall(e.userId, e.id)).find((r) => {
-          try {
-            const v = JSON.parse(r.text);
-            return (
-              v.schema === "walpen/v1" &&
-              v.id === e.id &&
-              v.body === e.body &&
-              v.memory === e.memory
-            );
-          } catch {
-            return false;
-          }
-        });
+        const found = (await memory.recall(e.userId, e.id)).results.find(
+          (r) => {
+            try {
+              const v = JSON.parse(r.text);
+              return (
+                v.schema === "walpen/v1" &&
+                v.id === e.id &&
+                v.body === e.body &&
+                v.memory === e.memory
+              );
+            } catch {
+              return false;
+            }
+          },
+        );
         if (found) {
           await store.sync(e.id, "synced", e.jobId, found.blob_id, null);
           return res.json({ entry: safe((await store.get(e.id, e.userId))!) });
@@ -394,47 +411,29 @@ export function createApp(
       });
     const { message, history, useMemory } = parsed.data;
     let sources: Source[] = [];
+    let context = budgetMemoryContext(sources);
+    let recall = emptyRecallDiagnostics(
+      maxDistance,
+      useMemory ? "unavailable" : "disabled",
+    );
     if (useMemory && memory.configured) {
       try {
         const remote = await memory.recall(res.locals.user.id, message);
-        const active = (await store.list(res.locals.user.id)).filter(
-          (e) => e.consent && e.status === "synced",
+        const selected = selectRecallContext(
+          remote,
+          await store.list(res.locals.user.id),
+          maxDistance,
         );
-        const seen = new Set<string>();
-        for (const r of remote) {
-          const e = active.find((e) => e.blobId === r.blob_id);
-          if (!e || seen.has(e.id)) continue;
-          let record: any;
-          try {
-            record = JSON.parse(r.text);
-          } catch {
-            continue;
-          }
-          if (
-            record.schema !== "walpen/v1" ||
-            record.id !== e.id ||
-            record.consent !== true ||
-            typeof record.memory !== "string" ||
-            record.memory !== e.memory
-          )
-            continue;
-          sources.push({
-            id: e.id,
-            title: e.title || "Một trang nhật ký",
-            text: record.memory,
-            date: e.occurredAt,
-            blobId: r.blob_id,
-          });
-          seen.add(e.id);
-        }
+        context = selected;
+        recall = selected.diagnostics;
       } catch {
+        recall = emptyRecallDiagnostics(maxDistance, "failed");
         return res.status(503).json({
-          error:
-            "Chưa đọc được ký ức từ Walrus. Thử lại hoặc tắt “Dùng ký ức” để trò chuyện không có bộ nhớ.",
+          error: recallNotices(recall, parsed.data.language)[0],
+          recall,
         });
       }
     }
-    const context = budgetMemoryContext(sources);
     sources = context.sources;
     // Do not trust old client-provided history to reintroduce withdrawn memories.
     const safeHistory = history.filter((m) => m.role === "user");
@@ -475,6 +474,7 @@ export function createApp(
         model: requestModel.name,
         memoryUsed: sources.length > 0,
         memoryBudget: context.meta,
+        recall,
       });
     } catch (err) {
       res.status(503).json({

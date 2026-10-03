@@ -40,6 +40,7 @@ export function createProfile(directory, noAI = false) {
         "MEMWAL_ACCOUNT_ID=",
         "MEMWAL_PRIVATE_KEY=",
         "MEMWAL_SERVER_URL=https://relayer.memory.walrus.xyz",
+        "MEMWAL_RECALL_MAX_DISTANCE=0.7",
         "",
       ].join("\n"),
       { flag: "wx", mode: 0o600 },
@@ -115,6 +116,7 @@ export function localEnvironment(file, inherited = process.env) {
     MEMWAL_PRIVATE_KEY: config.MEMWAL_PRIVATE_KEY || "",
     MEMWAL_SERVER_URL:
       config.MEMWAL_SERVER_URL || "https://relayer.memory.walrus.xyz",
+    MEMWAL_RECALL_MAX_DISTANCE: config.MEMWAL_RECALL_MAX_DISTANCE || "0.7",
   });
   return env;
 }

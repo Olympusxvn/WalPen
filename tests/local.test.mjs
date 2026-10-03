@@ -61,6 +61,23 @@ test("a missing or invalid key is never silently replaced", (t) => {
   assert.throws(() => createProfile(directory), /Restore/);
 });
 
+test("local recall threshold comes from the profile, not inherited cloud settings", (t) => {
+  const file = createProfile(fixture(t), true);
+  assert.equal(
+    localEnvironment(file, { MEMWAL_RECALL_MAX_DISTANCE: "off" })
+      .MEMWAL_RECALL_MAX_DISTANCE,
+    "0.7",
+  );
+  writeFileSync(
+    file,
+    readFileSync(file, "utf8").replace(
+      "MEMWAL_RECALL_MAX_DISTANCE=0.7",
+      "MEMWAL_RECALL_MAX_DISTANCE=0.35",
+    ),
+  );
+  assert.equal(localEnvironment(file, {}).MEMWAL_RECALL_MAX_DISTANCE, "0.35");
+});
+
 test("local launcher isolates production configuration and derives safe bind/origin/database", (t) => {
   const file = createProfile(fixture(t), true);
   const env = localEnvironment(file, {

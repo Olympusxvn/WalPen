@@ -1,0 +1,176 @@
+{
+  "recordedAt": "2026-09-19T05:46:22.872Z",
+  "scope": "Historical relayer responses for fictional Vietnamese memories; scores only, no user identifiers or text. Non-target hits are not automatically irrelevant.",
+  "cases": [
+    {
+      "case": 1,
+      "matches": [
+        {
+          "distance": 0.6931745990491829,
+          "expected": true
+        },
+        {
+          "distance": 0.7515054143211346,
+          "expected": false
+        },
+        {
+          "distance": 0.7595349945741419,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 2,
+      "matches": [
+        {
+          "distance": 0.6540162629972623,
+          "expected": true
+        },
+        {
+          "distance": 0.6653996931395956,
+          "expected": false
+        },
+        {
+          "distance": 0.6712930790164546,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 3,
+      "matches": [
+        {
+          "distance": 0.744760586344163,
+          "expected": false
+        },
+        {
+          "distance": 0.7530540756145415,
+          "expected": false
+        },
+        {
+          "distance": 0.7575867144446393,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 4,
+      "matches": [
+        {
+          "distance": 0.6453899447209372,
+          "expected": true
+        },
+        {
+          "distance": 0.7039373326009307,
+          "expected": false
+        },
+        {
+          "distance": 0.7320817379385299,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 5,
+      "matches": [
+        {
+          "distance": 0.6356938703967552,
+          "expected": true
+        },
+        {
+          "distance": 0.7475382802111703,
+          "expected": false
+        },
+        {
+          "distance": 0.7940532075156018,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 6,
+      "matches": [
+        {
+          "distance": 0.6104833891731526,
+          "expected": true
+        },
+        {
+          "distance": 0.7647787750985674,
+          "expected": false
+        },
+        {
+          "distance": 0.7714429414772287,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 7,
+      "matches": [
+        {
+          "distance": 0.5992838563427945,
+          "expected": true
+        },
+        {
+          "distance": 0.6193430565115954,
+          "expected": false
+        },
+        {
+          "distance": 0.6288487860124496,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 8,
+      "matches": [
+        {
+          "distance": 0.5659105912160374,
+          "expected": true
+        },
+        {
+          "distance": 0.695626479765857,
+          "expected": false
+        },
+        {
+          "distance": 0.7381014495081568,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 9,
+      "matches": [
+        {
+          "distance": 0.5037311735875991,
+          "expected": true
+        },
+        {
+          "distance": 0.6369533498535687,
+          "expected": false
+        },
+        {
+          "distance": 0.6901653122799241,
+          "expected": false
+        }
+      ]
+    },
+    {
+      "case": 10,
+      "matches": [
+        {
+          "distance": 0.5820534754048204,
+          "expected": true
+        },
+        {
+          "distance": 0.6477562588016579,
+          "expected": false
+        },
+        {
+          "distance": 0.6536352708929305,
+          "expected": false
+        }
+      ]
+    }
+  ]
+}

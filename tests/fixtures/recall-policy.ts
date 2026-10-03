@@ -1,0 +1,88 @@
+// Hand-authored distances: deterministic policy evaluation, not embeddings or Mainnet measurements.
+export const recallPolicyFixtures = [
+  {
+    language: "en",
+    query: "What helps me unwind?",
+    memory: "Walking by the river helps me unwind.",
+    distance: 0.18,
+    relevant: true,
+  },
+  {
+    language: "vi",
+    query: "Điều gì giúp mình bình tĩnh?",
+    memory: "Đi bộ ven sông giúp tôi bình tĩnh.",
+    distance: 0.22,
+    relevant: true,
+  },
+  {
+    language: "en",
+    query: "What do I prefer before bed?",
+    memory: "I like reading quietly before bed.",
+    distance: 0.36,
+    relevant: true,
+  },
+  {
+    language: "vi",
+    query: "Buổi tối mình thích làm gì?",
+    memory: "Tôi thích đọc sách yên tĩnh trước khi ngủ.",
+    distance: 0.44,
+    relevant: true,
+  },
+  {
+    language: "en",
+    query: "What helps me unwind?",
+    memory: "I bought a blue mug.",
+    distance: 0.82,
+    relevant: false,
+  },
+  {
+    language: "vi",
+    query: "Điều gì giúp mình bình tĩnh?",
+    memory: "Tôi mua một chiếc cốc xanh.",
+    distance: 0.78,
+    relevant: false,
+  },
+  {
+    language: "en",
+    query: "What should I cook?",
+    memory: "I prefer cycling on weekends.",
+    distance: 0.61,
+    relevant: false,
+  },
+  {
+    language: "vi",
+    query: "Mình nên nấu món gì?",
+    memory: "Cuối tuần tôi thích đạp xe.",
+    distance: 0.65,
+    relevant: false,
+  },
+  // Deliberate overlapping scores expose the limits of a threshold.
+  {
+    language: "en",
+    query: "What helps me unwind?",
+    memory: "I walk to the bank to pay bills.",
+    distance: 0.42,
+    relevant: false,
+  },
+  {
+    language: "vi",
+    query: "Điều gì giúp mình bình tĩnh?",
+    memory: "Tôi ra bờ sông để gặp khách hàng.",
+    distance: 0.46,
+    relevant: false,
+  },
+  {
+    language: "en",
+    query: "What helps me unwind?",
+    memory: "Ten minutes under the trees clears my head.",
+    distance: 0.54,
+    relevant: true,
+  },
+  {
+    language: "vi",
+    query: "Điều gì giúp mình bình tĩnh?",
+    memory: "Ngồi dưới tán cây một lát giúp đầu óc nhẹ hơn.",
+    distance: 0.58,
+    relevant: true,
+  },
+] as const;

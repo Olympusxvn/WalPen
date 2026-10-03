@@ -63,6 +63,8 @@ Without MemWal configuration, entries remain local and will not receive **Saved 
 
 ## Optional: enable Walrus memory
 
+Recall uses a provisional cosine-distance cutoff of `0.7`. Add `MEMWAL_RECALL_MAX_DISTANCE=0.35` to `data/local/.env` for a stricter cutoff, or `off` to disable that cutoff. Missing/invalid relevance scores remain excluded. Restart the local application after changes. For manual runs use `.env`; for Vercel set the server environment variable and redeploy. See [recall configuration and EN/VI evaluation](docs/RECALL-EVALUATION.md) before tuning; the default is not calibrated against Mainnet data.
+
 Stop WalPen with **Ctrl+C**. Open **`data/local/.env`** in your editor and fill in your own account credentials:
 
 ```dotenv

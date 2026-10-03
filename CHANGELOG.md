@@ -2,6 +2,13 @@
 
 Notable changes to WalPen are recorded here. Dates use `YYYY-MM-DD`.
 
+## 2026-10-03 — Recall relevance and diagnostics
+
+- Added the server setting `MEMWAL_RECALL_MAX_DISTANCE` (provisional default `0.7`) with strict distance filtering after current-revision and consent checks. Missing or invalid scores are excluded.
+- Preserved upstream recall totals and download/decryption drop counts without treating them as namespace size. Chat responses expose safe selection counts and reason codes; retrieval failures retain HTTP 503 with EN/VI errors.
+- Added EN/VI explanations for empty or incomplete retrieval. Zero selected sources no longer imply the user has never saved memories. The existing five-source / 768-estimated-token budget and post-generation consent checks remain enforced.
+- Added offline EN/VI policy fixtures, guard/regression coverage, and [configuration and evaluation notes](docs/RECALL-EVALUATION.md). The fixture distances are synthetic; they do not establish Mainnet recall accuracy.
+
 ## 2026-09-30 — Cloud deployment and Sui wallet sign-in
 
 WalPen's production API and journal cache now run on Vercel and Neon. The public application no longer needs the developer's computer, local API or temporary tunnel to stay online. Visitors can authenticate with a Sui wallet and configure a personal cloud AI key.
