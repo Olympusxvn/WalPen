@@ -1841,6 +1841,90 @@ main {
 .wallet-login p {
   margin: 0;
 }
+.wallet-choice {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #e1e8d5;
+  border-radius: 8px;
+  background: #f1f4eb;
+  text-align: left;
+}
+.wallet-choice strong {
+  color: #526c4f;
+  font-size: 13px;
+}
+.wallet-choice span {
+  color: #89967f;
+  font-size: 12px;
+}
+.how-page {
+  max-width: 1100px;
+}
+.how-page h1 {
+  margin: 10px 0 12px;
+}
+.how-intro {
+  max-width: 650px;
+  color: #89967f;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.how-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 17px;
+  margin-top: 32px;
+}
+.how-card {
+  min-height: 220px;
+  padding: 25px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+}
+.how-number {
+  color: #91a181;
+  font-family: Georgia, serif;
+  font-size: 28px;
+}
+.how-card h2 {
+  margin: 17px 0 12px;
+  color: #526c4f;
+  font-size: 19px;
+}
+.how-card p,
+.how-note p {
+  margin: 0;
+  color: #7f8d75;
+  font-size: 13px;
+  line-height: 1.85;
+}
+.how-note {
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+  margin-top: 20px;
+  padding: 17px 20px;
+  border: 1px solid #e1e8d5;
+  border-radius: 8px;
+  background: #edf1e5;
+  color: #7b946a;
+}
+.how-note svg {
+  flex: 0 0 auto;
+}
+.how-cta {
+  margin-top: 21px;
+}
+@media (max-width: 850px) {
+  .how-steps {
+    grid-template-columns: 1fr;
+  }
+  .how-card {
+    min-height: 0;
+  }
+}
 .wallet-invite {
   display: grid;
   gap: 6px;

@@ -26,9 +26,10 @@ import {
   Sparkles,
   Sprout,
   Waves,
+  Workflow,
   X,
 } from "lucide-react";
-type Page = "journal" | "write" | "talk" | "memories" | "settings";
+type Page = "journal" | "write" | "talk" | "memories" | "settings" | "how";
 type Entry = {
   id: string;
   rootId: string;
@@ -63,6 +64,7 @@ const nav = [
   { id: "journal", label: "Trang nhật ký", icon: BookOpen },
   { id: "talk", label: "Một cuộc trò chuyện", icon: MessageCircle },
   { id: "memories", label: "Điều được nhớ", icon: Sprout },
+  { id: "how", label: "Cách hoạt động", icon: Workflow },
 ] as const;
 const moods = [
   { icon: "🌿", label: "Bình yên" },
@@ -301,7 +303,7 @@ export default function App() {
   function go(p: Page) {
     setError("");
     setSelected(null);
-    if (!user && p !== "journal") {
+    if (!user && p !== "journal" && p !== "how") {
       setAuth(true);
       return;
     }
@@ -432,6 +434,8 @@ export default function App() {
           ? t("Trò chuyện cùng WalPen")
           : page === "memories"
             ? t("Những điều được giữ lại")
+            : page === "how"
+              ? t("How it works")
             : t("Không gian của bạn");
   return (
     <div className="app-shell">
@@ -813,6 +817,60 @@ export default function App() {
                     <Waves size={15} />
                   </span>
                 </footer>
+              </div>
+            )}
+            {page === "how" && (
+              <div className="page how-page">
+                <div className="eyebrow">{t("WALPEN · WALRUS MEMORY")}</div>
+                <h1>{t("How it works")}</h1>
+                <p className="how-intro">
+                  {t(
+                    "A private journal that can carry the memories you choose into future conversations.",
+                  )}
+                </p>
+                <div className="how-steps">
+                  <section className="how-card">
+                    <span className="how-number">01</span>
+                    <h2>{t("Connect your Sui wallet")}</h2>
+                    <p>
+                      {t(
+                        "Choose a wallet such as Slush or any other Sui wallet, then approve a personal sign-in message. No transaction or gas fee is needed.",
+                      )}
+                    </p>
+                  </section>
+                  <section className="how-card">
+                    <span className="how-number">02</span>
+                    <h2>{t("Write and choose what to remember")}</h2>
+                    <p>
+                      {t(
+                        "Write a journal entry and explicitly approve the memory excerpt you want WalPen to use. The memory is sent through Walrus Memory and persisted on Walrus Mainnet. Neon keeps supporting job state and cache metadata.",
+                      )}
+                    </p>
+                  </section>
+                  <section className="how-card">
+                    <span className="how-number">03</span>
+                    <h2>{t("Return and pick up where you left off")}</h2>
+                    <p>
+                      {t(
+                        "In a later conversation, Walrus Memory recalls relevant approved excerpts for the AI. You can stop using a memory at any time; this excludes it from future replies.",
+                      )}
+                    </p>
+                  </section>
+                </div>
+                <div className="how-note">
+                  <ShieldCheck size={20} />
+                  <p>
+                    {t(
+                      "Your journal is stored on Walrus. Neon supports the app with job and cache records; it is not the sole store for conversational memory.",
+                    )}
+                  </p>
+                </div>
+                <button
+                  className="primary how-cta"
+                  onClick={() => go("journal")}
+                >
+                  {t("Back to journal")} <ArrowRight size={16} />
+                </button>
               </div>
             )}
             {page === "write" && (

@@ -248,6 +248,7 @@ export const english: Record<string, string> = {
     "The previous save is unconfirmed. Your data is retained; retry requires verified duplicate protection.",
   "Nội dung hoặc đích lưu đã thay đổi. Cần đối soát lần lưu trước trước khi tiếp tục.":
     "The content or storage destination changed. Reconcile the previous save before continuing.",
+  "Cách hoạt động": "How it works",
 };
 export const vietnamese: Record<string, string> = {
   "A LITTLE ROOM FOR YOURSELF": "MỘT KHOẢNG LẶNG CHO RIÊNG MÌNH",
@@ -257,6 +258,22 @@ export const vietnamese: Record<string, string> = {
   "Memory, held with Walrus": "Ký ức, được giữ cùng Walrus",
   "WalPen v0.1 · Built with Walrus Memory & Ollama":
     "WalPen v0.1 · Xây dựng với Walrus Memory & Ollama",
+  "How it works": "Cách hoạt động",
+  "WALPEN · WALRUS MEMORY": "WALPEN · WALRUS MEMORY",
+  "A private journal that can carry the memories you choose into future conversations.":
+    "Một cuốn nhật ký riêng, mang theo những ký ức bạn chọn vào các cuộc trò chuyện sau.",
+  "Connect your Sui wallet": "Kết nối ví Sui",
+  "Choose a wallet such as Slush or any other Sui wallet, then approve a personal sign-in message. No transaction or gas fee is needed.":
+    "Chọn Slush hoặc bất kỳ ví Sui nào khác, rồi duyệt thông điệp đăng nhập bằng chữ ký cá nhân. Không cần giao dịch hay phí gas.",
+  "Write and choose what to remember": "Viết và chọn điều muốn lưu nhớ",
+  "Write a journal entry and explicitly approve the memory excerpt you want WalPen to use. The memory is sent through Walrus Memory and persisted on Walrus Mainnet. Neon keeps supporting job state and cache metadata.":
+    "Viết nhật ký và chủ động duyệt đoạn ký ức bạn muốn WalPen sử dụng. Ký ức được gửi qua Walrus Memory và lưu trên Walrus Mainnet. Neon giữ trạng thái job và siêu dữ liệu cache hỗ trợ.",
+  "Return and pick up where you left off": "Trở lại và tiếp tục câu chuyện",
+  "In a later conversation, Walrus Memory recalls relevant approved excerpts for the AI. You can stop using a memory at any time; this excludes it from future replies.":
+    "Trong cuộc trò chuyện sau, Walrus Memory tìm lại các đoạn đã duyệt có liên quan cho AI. Bạn có thể ngừng sử dụng một ký ức bất cứ lúc nào để loại ký ức đó khỏi các câu trả lời tiếp theo.",
+  "Your journal is stored on Walrus. Neon supports the app with job and cache records; it is not the sole store for conversational memory.":
+    "Nhật ký của bạn được lưu trên Walrus. Neon hỗ trợ ứng dụng với thông tin job và cache; bộ nhớ hội thoại không chỉ được lưu trong Neon.",
+  "Back to journal": "Về nhật ký",
 };
 export function translate(value: string, language: "vi" | "en") {
   const key = value.trim();

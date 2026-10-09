@@ -77,6 +77,14 @@ export function WalletLogin({
           ? "Connect your wallet, then approve a personal sign-in message. No transaction or gas fee is requested."
           : "Kết nối ví, rồi duyệt chữ ký thông điệp đăng nhập. Không gửi giao dịch hay yêu cầu phí gas."}
       </p>
+      <div className="wallet-choice">
+        <strong>{en ? "Choose a wallet" : "Chọn ví"}</strong>
+        <span>
+          {en
+            ? "Slush or any other Sui wallet"
+            : "Slush hoặc bất kỳ ví Sui nào khác"}
+        </span>
+      </div>
       <ConnectButton />
       {inviteRequired && !link && (
         <label className="wallet-invite">
