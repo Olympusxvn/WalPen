@@ -36,6 +36,140 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
     second = new PostgresStore(pool, key);
   try {
     await first.init();
+    const telegramOwner = randomUUID();
+    await first.addUser({
+      id: telegramOwner,
+      username: telegramOwner,
+      password: "test-only-password",
+      createdAt: new Date().toISOString(),
+    });
+    assert.equal(
+      await first.issueTelegramLinkCode({
+        telegramId: "600001",
+        codeHash: "expired-code-digest",
+        createdAt: 1_000_000,
+        expiresAt: 1_600_000,
+      }),
+      true,
+    );
+    assert.equal(
+      await second.issueTelegramLinkCode({
+        telegramId: "600001",
+        codeHash: "cooldown-code-digest",
+        createdAt: 1_059_999,
+        expiresAt: 1_659_999,
+      }),
+      false,
+    );
+    assert.equal(
+      await second.consumeTelegramLinkCode(
+        "expired-code-digest",
+        telegramOwner,
+        1_600_000,
+      ),
+      "expired",
+    );
+    assert.equal(
+      await first.issueTelegramLinkCode({
+        telegramId: "600002",
+        codeHash: "valid-code-digest",
+        createdAt: 1_700_000,
+        expiresAt: 2_300_000,
+      }),
+      true,
+    );
+    assert.equal(
+      await second.consumeTelegramLinkCode(
+        "valid-code-digest",
+        telegramOwner,
+        1_700_001,
+      ),
+      "linked",
+    );
+    assert.equal(await second.telegramUserId("600002"), telegramOwner);
+    assert.equal(
+      (await first.telegramLinkForUser(telegramOwner))?.telegramId,
+      "600002",
+    );
+    assert.equal(
+      await first.issueTelegramLinkCode({
+        telegramId: "600003",
+        codeHash: "conflict-code-digest",
+        createdAt: 1_700_000,
+        expiresAt: 2_300_000,
+      }),
+      true,
+    );
+    assert.equal(
+      await second.consumeTelegramLinkCode(
+        "conflict-code-digest",
+        telegramOwner,
+        1_700_002,
+      ),
+      "conflict",
+    );
+
+    const telegramJob = {
+      updateId: 900001,
+      telegramId: "600002",
+      chatId: "600002",
+      text: "private telegram journal must stay encrypted",
+      language: "en" as const,
+    };
+    assert.deepEqual(await first.enqueueTelegramUpdate(telegramJob, 1_000), {
+      created: true,
+      state: "queued",
+    });
+    assert.deepEqual(await second.enqueueTelegramUpdate(telegramJob, 1_001), {
+      created: false,
+      state: "queued",
+    });
+    const telegramRaw = (
+      await pool.query(
+        "SELECT payload_ciphertext FROM telegram_updates WHERE update_id=$1",
+        [telegramJob.updateId],
+      )
+    ).rows[0].payload_ciphertext as string;
+    assert.ok(!telegramRaw.includes(telegramJob.text));
+    assert.deepEqual(
+      await first.claimTelegramUpdate(telegramJob.updateId, 1_001, 361_000),
+      telegramJob,
+    );
+    assert.equal(
+      await second.claimTelegramUpdate(telegramJob.updateId, 2_000, 362_000),
+      undefined,
+    );
+    assert.deepEqual(
+      await second.claimTelegramUpdate(telegramJob.updateId, 361_000, 721_000),
+      telegramJob,
+    );
+    const telegramEntry = journal(telegramOwner);
+    const telegramSaved = await first.insertTelegramEntry(
+      telegramJob.updateId,
+      telegramEntry,
+    );
+    const telegramReplay = await second.insertTelegramEntry(
+      telegramJob.updateId,
+      journal(telegramOwner),
+    );
+    assert.equal(telegramSaved.created, true);
+    assert.equal(telegramReplay.created, false);
+    assert.equal(telegramReplay.entry.id, telegramEntry.id);
+    const telegramEntryRaw = (
+      await pool.query("SELECT payload FROM entries WHERE id=$1", [
+        telegramEntry.id,
+      ])
+    ).rows[0].payload as string;
+    assert.ok(!telegramEntryRaw.includes(telegramEntry.body));
+    assert.equal(
+      (await second.get(telegramEntry.id, telegramOwner))?.body,
+      telegramEntry.body,
+    );
+    await second.finishTelegramUpdate(telegramJob.updateId, "done", 361_001);
+    assert.equal(
+      await first.claimTelegramUpdate(telegramJob.updateId, 800_000, 1_160_000),
+      undefined,
+    );
     const memory = {
       configured: false,
       prepare: (e: Entry) => ({
