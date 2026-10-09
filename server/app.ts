@@ -44,6 +44,10 @@ const entrySchema = z
   .refine((e) => !e.consent || e.memory.length > 0, {
     message: "Hãy chọn nội dung bạn muốn WalPen nhớ.",
   });
+const telegramLinkSchema = z.object({
+  code: z.string().trim().min(1).max(128),
+});
+const telegramLinkError = "Link code is invalid or expired.";
 const cookieName = "walpen_session";
 export function createApp(
   store: Repository,
@@ -127,6 +131,13 @@ export function createApp(
   const authLimiter = rateLimit({
     windowMs: 15 * 60000,
     limit: 20,
+    skip: () => options.rateLimits === false,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  });
+  const telegramLinkLimiter = rateLimit({
+    windowMs: 15 * 60000,
+    limit: 5,
     skip: () => options.rateLimits === false,
     standardHeaders: "draft-8",
     legacyHeaders: false,
@@ -222,6 +233,27 @@ export function createApp(
         .json({ error: "Hãy đăng nhập để mở trang nhật ký của bạn." });
     res.locals.user = user;
     next();
+  });
+
+  app.get("/api/telegram/status", async (_req, res) => {
+    const link = await store.telegramLinkForUser(res.locals.user.id);
+    return link
+      ? res.json({ linked: true, ...link })
+      : res.json({ linked: false });
+  });
+  app.post("/api/telegram/link", telegramLinkLimiter, async (req, res) => {
+    const parsed = telegramLinkSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({ error: telegramLinkError });
+    const codeHash = hash(parsed.data.code.toUpperCase());
+    const result = await store.consumeTelegramLinkCode(
+      codeHash,
+      res.locals.user.id,
+      Date.now(),
+    );
+    if (result !== "linked")
+      return res.status(400).json({ error: telegramLinkError });
+    return res.json({ linked: true });
   });
   app.post("/api/logout", async (req, res) => {
     const token = req.headers.cookie
