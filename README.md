@@ -54,7 +54,14 @@ WalPen is a journaling app for people who want continuity between conversations 
 
 Cloud chat requires your Gemini or OpenAI API key in **Settings**. Your provider's model access, quotas and charges apply. A successful response using a real cloud-provider key remains unverified; the recorded answer-quality examples below used local Ollama. The website and API operate without the developer's computer running.
 
-**Model and runtime used for the recorded memory evaluations:** Qwen3 4B Instruct 2507 (`qwen3:4b-instruct-2507-q4_K_M`) through local Ollama. This is the model/runtime WalPen identifies as its primary evaluation setup for the **Beyond the Big Two** track; the historical recall results below were produced with it. The Vercel deployment separately supports Gemini and OpenAI through a visitor's own API key. Those hosted alternatives are not the model/runtime behind the recorded Qwen evaluations.
+**Beyond the Big Two track:** WalPen's primary evaluated LLM is **Qwen3 4B Instruct 2507**. The runtime is **Ollama**, using model tag `qwen3:4b-instruct-2507-q4_K_M`. The Vercel deployment also supports Gemini and OpenAI with a visitor-provided key so judges and guests can use the public website without the developer's machine running. That cloud support is a hosted fallback/access option, not the runtime behind the recorded memory evaluation.
+
+| Mode | Purpose | LLM/runtime | Notes |
+|:---|:---|:---|:---|
+| Local judge/evaluation mode | Recorded recall tests and Beyond the Big Two evidence | Qwen3 4B Instruct 2507 through Ollama, `qwen3:4b-instruct-2507-q4_K_M` | Requires a local Ollama process and MemWal credentials; this is the primary evaluated setup |
+| Vercel cloud mode | Public demo access for judges and guests | Gemini or OpenAI through a user-provided API key | Keeps the site usable without the developer's computer; not the primary evaluated LLM/runtime |
+
+**Walrus Memory friction in the Qwen/Ollama setup:** local Ollama adds latency and does not fit inside Vercel serverless functions, so WalPen separates the public web deployment from the local judge runtime. The integration also exposed retry/write uncertainty: after a timeout or restart, a client may not know whether `remember()` was accepted. WalPen mitigates this with a persisted database claim before submit, Vercel `waitUntil()` for bounded background work in cloud mode, and Neon write-job state for job IDs, receipts and recovery. The remaining SDK-level gaps are documented in the MemWal tickets below.
 
 **Published article:** [I Built a Chatbot That Remembers Users Between Sessions — Medium](https://medium.com/@olympusxvn/walpen-a-journaling-chatbot-that-remembers-users-between-sessions-1e3185c0a7bf?sharedUserId=olympusxvn).
 
