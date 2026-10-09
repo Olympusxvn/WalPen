@@ -54,6 +54,10 @@ WalPen is a journaling app for people who want continuity between conversations 
 
 Cloud chat requires your Gemini or OpenAI API key in **Settings**. Your provider's model access, quotas and charges apply. A successful response using a real cloud-provider key remains unverified; the recorded answer-quality examples below used local Ollama. The website and API operate without the developer's computer running.
 
+**Model and runtime used for the recorded memory evaluations:** Qwen3 4B Instruct 2507 (`qwen3:4b-instruct-2507-q4_K_M`) through local Ollama. This is the model/runtime WalPen identifies as its primary evaluation setup for the **Beyond the Big Two** track; the historical recall results below were produced with it. The Vercel deployment separately supports Gemini and OpenAI through a visitor's own API key. Those hosted alternatives are not the model/runtime behind the recorded Qwen evaluations.
+
+**Published article:** [I Built a Chatbot That Remembers Users Between Sessions — Medium](https://medium.com/@olympusxvn/walpen-a-journaling-chatbot-that-remembers-users-between-sessions-1e3185c0a7bf?sharedUserId=olympusxvn).
+
 Existing password accounts can sign in using **Existing account / password sign-in**, then link a Sui wallet in Settings. Linking keeps their journal and existing Walrus namespace. See the [friend testing guide](docs/FRIEND-TEST-GUIDE.vi.md) and [deployment evidence](docs/CLOUD-DEPLOYMENT.md).
 
 1. Write a short fictional entry with a fact you can check, such as a planned activity.
@@ -229,16 +233,16 @@ Public summaries are in [implementation status](docs/IMPLEMENTATION-STATUS.md), 
 <a id="contributions"></a>
 ## 🔌 MemWal contributions and adoption
 
-WalPen adopts two improvements associated with earlier Session 7 feedback and adds three reports from the Session 8 build.
+WalPen adopts two improvements associated with earlier Session 7 feedback and filed three MemWal reports on **29 September 2026**, during the event. The three reports below document the environment, reproduction or failure scenario, expected/observed behavior, and supporting evidence. They are candidates for the event's bug-bounty track, which separately recognizes actionable bug reports and feature requests.
 
 | Contribution | Connection to WalPen |
 |:---|:---|
 | [#591](https://github.com/MystenLabs/MemWal/issues/591) / [PR #885](https://github.com/MystenLabs/MemWal/pull/885) | The discussion separated asynchronous write timing from Security Delete behavior. The PR addresses the narrower server-side deletion filter; it does not establish a general stale-after-forget bug. |
 | [#592](https://github.com/MystenLabs/MemWal/issues/592) / [PR #605](https://github.com/MystenLabs/MemWal/pull/605) | SDK token budgeting now bounds WalPen's approved memory context while retaining complete excerpts. |
 | [#277](https://github.com/MystenLabs/MemWal/issues/277), related to #592 | Earlier Special One feedback on serverless latency and bounded recall context. #592 proposes token accounting at the SDK boundary; time budgets and token budgets address different limits. |
-| [#1047](https://github.com/MystenLabs/MemWal/issues/1047) | Historical encryption-backend failures, with job IDs, timing and subsequent recovery evidence. |
-| [#1048](https://github.com/MystenLabs/MemWal/issues/1048) | A durable recovery guide for timeouts and process restarts using existing SDK APIs. |
-| [#1049](https://github.com/MystenLabs/MemWal/issues/1049) | A proposed read-only receipt lookup by idempotency key when the original job ID was lost. |
+| [#1047](https://github.com/MystenLabs/MemWal/issues/1047) | **Bug report — historical Mainnet write failures.** Environment: MemWal SDK 0.1.7, Node.js 24.6.0 on Windows, hosted relayer/Mainnet. Scenario: submit five small fictional records rapidly to one namespace and inspect each accepted job through `waitForRememberJob()` and `getRememberStatus()`. Expected: each accepted job completes or returns actionable recovery information. Observed: three jobs reached terminal failure with `Memory encryption backend is unavailable`; two succeeded. The incident is historical and not currently reproducible. Evidence: [job IDs, timestamps and investigation](docs/MEMWAL-ENCRYPTION-INCIDENT.md). |
+| [#1048](https://github.com/MystenLabs/MemWal/issues/1048) | **Documentation feature request — durable recovery after timeout/restart.** Environment: SDK 0.1.7 in WalPen's Node.js API, locally and on Vercel with Neon. Scenario: persist the payload/key, submit `remember()`, then simulate a lost acceptance response or restart before storing the returned job ID; also simulate polling timeout and resume after restart. Expected: a documented, tested recipe distinguishes pending, failed and unknown outcomes and safely resumes with supported APIs. Observed: `getRememberStatus()` needs a job ID, and the SDK guide did not give WalPen a complete durable recovery path for these cases. Evidence: [recovery scenarios and acceptance criteria](docs/MEMWAL-RECOVERY-DOCS-TICKET.md). |
+| [#1049](https://github.com/MystenLabs/MemWal/issues/1049) | **SDK/API feature request — read-only receipt lookup by idempotency key.** Environment: SDK 0.1.7, Node.js API, Vercel/Neon and the hosted Mainnet relayer. Scenario: let the relayer accept a write but drop the response; restart with the persisted namespace/key but no job ID. Expected: look up the original receipt/job ID without creating a write, with documented scope and retention. Observed: `getRememberStatus()` cannot be called without the job ID; replaying `remember()` is a write and may create another job if the key mapping is no longer retained. Evidence: [use case, API sketch and acceptance tests](docs/MEMWAL-RECEIPT-LOOKUP-TICKET.md). |
 
 The hosted relayer's reported build contains #885's exclusion query; runtime activation depends on its schema/configuration. WalPen retains its own consent and revision checks. The receipt-lookup API in #1049 remains a proposal. See [integration boundaries](docs/MEMWAL-PR-INTEGRATION.md).
 
@@ -306,7 +310,8 @@ MemWal's `restore` repairs its search index; it does not reconstruct WalPen acco
 | [Slush review](docs/SLUSH-REVIEW.md) | Reported website warning, completed checks and submitted-review status |
 | [Implementation status](docs/IMPLEMENTATION-STATUS.md) | Verified results and outstanding work |
 | [MemWal PR integration](docs/MEMWAL-PR-INTEGRATION.md) | #605/#885 adoption and validation |
-| [Article draft](docs/ARTICLE-EN.md) | Build story, before/after and integration lessons; not yet published on Medium/Inkray |
+| [Published Medium article](https://medium.com/@olympusxvn/walpen-a-journaling-chatbot-that-remembers-users-between-sessions-1e3185c0a7bf?sharedUserId=olympusxvn) | Public build story and Walrus Memory integration experience |
+| [Article source draft](docs/ARTICLE-EN.md) | Working copy and supporting build/evaluation notes; the published Medium article is the submission version |
 | [Submission checklist](docs/SUBMISSION-CHECKLIST.md) | Readiness against Event Rules and remaining tasks |
 | [Editorial notes](docs/ARTICLE-EDITORIAL-NOTES.md) | Keywords, evidence sources and writing constraints |
 | [Encryption incident](docs/MEMWAL-ENCRYPTION-INCIDENT.md) | Evidence behind #1047 |
