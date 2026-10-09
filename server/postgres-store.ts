@@ -213,8 +213,8 @@ export class PostgresStore implements Repository {
         telegramId,
       ]);
       await client.query(
-        "DELETE FROM telegram_link_codes WHERE telegram_id=$1 AND expires_at<=$2",
-        [telegramId, input.createdAt],
+        "DELETE FROM telegram_link_codes WHERE expires_at<=$1",
+        [input.createdAt],
       );
       const recent = (
         await client.query(
@@ -323,6 +323,20 @@ export class PostgresStore implements Repository {
       )
     ).rows[0];
     return { created: false, state: existing.state };
+  }
+  async pendingTelegramUpdateIds(
+    now: number,
+    limit: number,
+  ): Promise<number[]> {
+    const boundedLimit = Math.max(0, Math.min(50, Math.trunc(limit)));
+    if (boundedLimit === 0) return [];
+    const rows = (
+      await this.pool.query(
+        "SELECT update_id FROM telegram_updates WHERE (state='queued' AND available_at<=$1) OR (state='processing' AND lease_until<=$1) ORDER BY available_at,update_id LIMIT $2",
+        [now, boundedLimit],
+      )
+    ).rows as { update_id: string | number }[];
+    return rows.map((row) => Number(row.update_id));
   }
   async claimTelegramUpdate(
     updateId: number,

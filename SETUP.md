@@ -40,26 +40,48 @@ npm run setup:local -- --no-ai
 
 This mode does not configure a local model; no model responses are simulated. Chat needs either Ollama or a personal Gemini/OpenAI key added in Settings. On an existing profile, `--no-ai` preserves your settings: edit `LLM_PROVIDER=` in `data/local/.env` to disable the configured local model. Remove any personal key in Settings as well if you want a journal-only review.
 
-| Command | Result |
-| :--- | :--- |
-| `npm run setup:local` | Install, build, prepare Ollama and run |
-| `npm run setup:local -- --no-start` | Prepare everything, then exit |
-| `npm run setup:local -- --no-ai --no-start` | Prepare a fresh journal-only profile, then exit |
-| `npm run start:local` | Run the existing local profile without reinstalling |
-| `npm test` | Run application and setup regression tests |
+| Command                                     | Result                                              |
+| :------------------------------------------ | :-------------------------------------------------- |
+| `npm run setup:local`                       | Install, build, prepare Ollama and run              |
+| `npm run setup:local -- --no-start`         | Prepare everything, then exit                       |
+| `npm run setup:local -- --no-ai --no-start` | Prepare a fresh journal-only profile, then exit     |
+| `npm run start:local`                       | Run the existing local profile without reinstalling |
+| `npm test`                                  | Run application and setup regression tests          |
 
 These commands use Node.js on Windows, macOS and Linux. The local setup has been exercised on Windows; macOS/Linux are not separately verified.
 
 ## What each mode can demonstrate
 
-| Local configuration | Available | Not demonstrated |
-| :--- | :--- | :--- |
-| Journal only, no personal AI key | Registration, writing, editing, language switch, local persistence | Chat, Walrus storage, semantic memory recall |
-| Ollama, no MemWal keys (default) | Journal plus local model chat | Walrus storage, saved-memory recall, blob receipts |
-| Ollama plus your MemWal account | Journal, chat, Mainnet writes and memory recall | Depends on relayer/account availability; setup alone is not Mainnet evidence |
+| Local configuration                    | Available                                                          | Not demonstrated                                                                                            |
+| :------------------------------------- | :----------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| Journal only, no personal AI key       | Registration, writing, editing, language switch, local persistence | Chat, Walrus storage, semantic memory recall                                                                |
+| Ollama, no MemWal keys (default)       | Journal plus local model chat                                      | Walrus storage, saved-memory recall, blob receipts                                                          |
+| Ollama plus your MemWal account        | Journal, chat, Mainnet writes and memory recall                    | Depends on relayer/account availability; setup alone is not Mainnet evidence                                |
 | Personal Gemini/OpenAI key in Settings | Cloud-model chat without local Ollama; optional MemWal integration | Successful live cloud-provider generation remains unverified; online provider access and quota are required |
 
 Without MemWal configuration, entries remain local and will not receive **Saved on Walrus** confirmation. Local journal pages do not automatically become Ollama memory context.
+
+## Optional: connect Telegram
+
+Telegram is an additional private-chat entry point. A Telegram account is linked to a signed-in WalPen account with a one-time code: send `/start` to your bot, sign in to WalPen, open **Settings**, and enter the code shown in that private chat. Codes expire after 10 minutes and cannot be reused. The bot uses the server-configured AI provider; it does not use a browser BYOK key.
+
+Set these variables in the server environment. In Vercel, add them under the WalPen project's environment variables and redeploy. For a manually run server, add them to its private `.env` file. Keep both secrets out of source control and chat. The existing `APP_ORIGIN` must point to the page where users can sign in.
+
+```dotenv
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
+TELEGRAM_WEBHOOK_SECRET=YOUR_RANDOM_WEBHOOK_SECRET
+TELEGRAM_RECALL_TIMEOUT_MS=8000
+```
+
+Set Telegram's webhook once to the public HTTPS endpoint. In PowerShell, set the two secret values in the current shell first, then run:
+
+```powershell
+curl.exe -X POST "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/setWebhook" -F "url=https://walpen.vercel.app/api/telegram-webhook" -F "secret_token=$env:TELEGRAM_WEBHOOK_SECRET"
+```
+
+For a local test, start WalPen on port 3002, expose it through a temporary HTTPS tunnel, and replace the URL above with the tunnel URL plus `/api/telegram-webhook`. Set `APP_ORIGIN` to the matching local WalPen URL. The local bot works only while the server and tunnel are running. The hosted webhook does not depend on your computer. When Telegram credentials are absent, the rest of the API remains available and the webhook returns 503.
+
+The webhook stores its encrypted update in Neon on the hosted app or SQLite in a local profile before Telegraf acknowledges it, then registers bounded background work. The hosted app uses Vercel `waitUntil()`. The current catch-all API function keeps its configured 300-second maximum duration; the worker lease is 360 seconds so another invocation will not reclaim a job while the original Vercel worker may still be running. To remove the webhook after a test, call Telegram's `deleteWebhook` method with the same bot token.
 
 ## Optional: enable Walrus memory
 
@@ -89,11 +111,11 @@ Steps 3–5 require working MemWal credentials; skip them for a local UI-only re
 
 ## Files, restart and recovery
 
-| Path | Purpose |
-| :--- | :--- |
-| `data/local/.env` | Local port, random encryption key, Ollama settings and optional MemWal credentials |
-| `data/local/walpen.sqlite` | Local accounts, journal cache and write state |
-| `data/local/ollama.log` | Output if setup starts an Ollama server |
+| Path                       | Purpose                                                                            |
+| :------------------------- | :--------------------------------------------------------------------------------- |
+| `data/local/.env`          | Local port, random encryption key, Ollama settings and optional MemWal credentials |
+| `data/local/walpen.sqlite` | Local accounts, journal cache and write state                                      |
+| `data/local/ollama.log`    | Output if setup starts an Ollama server                                            |
 
 The local profile uses port **3002**, binds to loopback, and does not load the root `.env` or the public demo database. Running setup again preserves the existing profile and key. It replaces `node_modules` via `npm ci` and rebuilds `dist`, so stop any local WalPen instance in this checkout before rerunning setup; use a separate clone if the checkout is serving another demo.
 

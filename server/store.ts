@@ -322,6 +322,16 @@ export class Store implements Repository {
     };
     return { created: Number(inserted.changes) === 1, state: row.state };
   }
+  pendingTelegramUpdateIds(now: number, limit: number): number[] {
+    const boundedLimit = Math.max(0, Math.min(50, Math.trunc(limit)));
+    if (boundedLimit === 0) return [];
+    return this.db
+      .prepare(
+        "SELECT update_id FROM telegram_updates WHERE (state='queued' AND available_at<=?) OR (state='processing' AND lease_until<=?) ORDER BY available_at,update_id LIMIT ?",
+      )
+      .all(now, now, boundedLimit)
+      .map((row: any) => Number(row.update_id));
+  }
   claimTelegramUpdate(
     updateId: number,
     now: number,

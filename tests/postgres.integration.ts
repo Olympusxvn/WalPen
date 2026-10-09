@@ -131,10 +131,12 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
       )
     ).rows[0].payload_ciphertext as string;
     assert.ok(!telegramRaw.includes(telegramJob.text));
+    assert.deepEqual(await first.pendingTelegramUpdateIds(1_000, 10), [900001]);
     assert.deepEqual(
       await first.claimTelegramUpdate(telegramJob.updateId, 1_001, 361_000),
       telegramJob,
     );
+    assert.deepEqual(await second.pendingTelegramUpdateIds(2_000, 10), []);
     assert.equal(
       await second.claimTelegramUpdate(telegramJob.updateId, 2_000, 362_000),
       undefined,
@@ -143,6 +145,7 @@ test("cloud repository preserves sessions, encrypted entries and single-submit c
       await second.claimTelegramUpdate(telegramJob.updateId, 361_000, 721_000),
       telegramJob,
     );
+    assert.deepEqual(await first.pendingTelegramUpdateIds(362_000, 10), []);
     const telegramEntry = journal(telegramOwner);
     const telegramSaved = await first.insertTelegramEntry(
       telegramJob.updateId,

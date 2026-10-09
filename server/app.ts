@@ -12,6 +12,11 @@ import { LocalModel } from "./llm.ts";
 import { budgetMemoryContext } from "./memory-context.ts";
 import { addWalletAuth } from "./wallet-auth.ts";
 import {
+  createTelegramBot,
+  telegramJobFromUpdate,
+  type TelegramChannelConfig,
+} from "./channels/telegram.ts";
+import {
   emptyRecallDiagnostics,
   recallMaxDistance,
   selectRecallContext,
@@ -62,6 +67,7 @@ export function createApp(
     trustProxy?: number | string;
     recallMaxDistance?: number | null;
     idempotencyRetryWindowMs?: number;
+    telegram?: TelegramChannelConfig;
   } = {},
 ) {
   const app = express();
@@ -99,6 +105,53 @@ export function createApp(
     }),
   );
   app.use(express.json({ limit: "64kb" }));
+  const telegramBot = options.telegram
+    ? createTelegramBot(
+        {
+          store,
+          memory,
+          model,
+          background,
+          recallMaxDistance: maxDistance,
+          retryWindowMs: writeWindow,
+        },
+        options.telegram,
+      )
+    : undefined;
+  if (telegramBot) {
+    app.use("/api/telegram-webhook", async (req, res, next) => {
+      if (req.method !== "POST") return next();
+      const expected = Buffer.from(options.telegram!.webhookSecret);
+      const supplied = Buffer.from(
+        req.get("X-Telegram-Bot-Api-Secret-Token") ?? "",
+      );
+      if (
+        supplied.length !== expected.length ||
+        !timingSafeEqual(supplied, expected)
+      )
+        return res.status(401).end();
+      const job = telegramJobFromUpdate(req.body);
+      if (!job) return next();
+      try {
+        const queued = await store.enqueueTelegramUpdate(job, Date.now());
+        if (queued.created)
+          background(telegramBot.processTelegramJob(job.updateId));
+        return next();
+      } catch {
+        return next(new Error("Telegram queue is unavailable."));
+      }
+    });
+    app.use(
+      telegramBot.webhookCallback("/api/telegram-webhook", {
+        secretToken: options.telegram!.webhookSecret,
+      }),
+    );
+    app.use("/api/telegram-webhook", (_req, res) => res.status(401).end());
+  } else {
+    app.use("/api/telegram-webhook", (_req, res) =>
+      res.status(503).json({ error: "Telegram webhook is not configured." }),
+    );
+  }
   app.use("/api", (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     next();
@@ -558,5 +611,8 @@ export function createApp(
       (await store.pending(userId, writeWindow)).map((entry) => sync(entry)),
     );
   }
-  return { app, resume };
+  async function resumeTelegramJobs(maxJobs = 10) {
+    await telegramBot?.resumeTelegramJobs(maxJobs);
+  }
+  return { app, resume, resumeTelegramJobs };
 }

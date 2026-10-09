@@ -70,6 +70,7 @@ export interface Repository {
     created: boolean;
     state: "queued" | "processing" | "done" | "failed" | "uncertain";
   }>;
+  pendingTelegramUpdateIds(now: number, limit: number): Result<number[]>;
   claimTelegramUpdate(
     updateId: number,
     now: number,

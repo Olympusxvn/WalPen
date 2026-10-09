@@ -203,3 +203,19 @@ test("telegram entry insertion is idempotent and encrypted", (t) => {
     .get(message.updateId) as { entry_id: string };
   assert.equal(rawUpdate.entry_id, "entry-1");
 });
+
+test("pending Telegram job scan returns only eligible leased work within its bound", (t) => {
+  const store = newStore();
+  t.after(() => store.db.close());
+  const queued = inbound(71);
+  const leased = inbound(72);
+  store.enqueueTelegramUpdate(queued, 1_000);
+  store.enqueueTelegramUpdate(leased, 1_000);
+  store.claimTelegramUpdate(leased.updateId, 1_001, 361_000);
+  assert.deepEqual(store.pendingTelegramUpdateIds(2_000, 10), [71]);
+  assert.deepEqual(store.pendingTelegramUpdateIds(2_000, 0), []);
+  assert.deepEqual(store.pendingTelegramUpdateIds(361_000, 1), [71]);
+  assert.deepEqual(store.pendingTelegramUpdateIds(361_000, 50), [71, 72]);
+  store.finishTelegramUpdate(leased.updateId, "done", 361_001);
+  assert.deepEqual(store.pendingTelegramUpdateIds(800_000, 50), [71]);
+});
