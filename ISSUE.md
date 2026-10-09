@@ -1,6 +1,6 @@
 # WalPen issues and MemWal contributions
 
-Last reviewed: **3 October 2026**. Statuses below are a dated snapshot; the linked GitHub threads are authoritative.
+Last reviewed: **9 October 2026**. Statuses below are a dated snapshot; the linked GitHub threads are authoritative.
 
 This record separates WalPen's application backlog, earlier upstream contributions adopted by the project, and new Session 8 feedback. A proposal or open issue does not mean the feature has shipped.
 
@@ -56,6 +56,28 @@ All three issues were **open**, with only the automated acknowledgment and no hu
 The SDK already supports caller-supplied idempotency keys and job-ID status lookup. #1049 requests the missing lookup path; it is not a request to add idempotent writes again. WalPen now persists and passes its own per-revision key through #2. Unverified or expired recovery conditions retain uncertainty.
 
 A Codex follow-up is configured for **09:00 daily, Asia/Bangkok (UTC+7)**. It checks these three threads and linked fixes, reports meaningful changes, and stays quiet for unchanged state or routine bot acknowledgments. It does not post replies or change this repository automatically. The last-seen state is kept locally outside version control; this document remains a dated record.
+
+## Session 8 performance and latency mitigation reports
+
+Added **9 October 2026**. These are distinct infrastructure boundaries from [#277](https://github.com/MystenLabs/MemWal/issues/277) (serverless latency/recovery guidance), [#1048](https://github.com/MystenLabs/MemWal/issues/1048) (durable recovery recipe), and [#1049](https://github.com/MystenLabs/MemWal/issues/1049) (receipt lookup by idempotency key). They do not replace those threads. Filed upstream in order as [#1164](https://github.com/MystenLabs/MemWal/issues/1164), [#1165](https://github.com/MystenLabs/MemWal/issues/1165), [#1166](https://github.com/MystenLabs/MemWal/issues/1166).
+
+**[WalPen #3 — Client-side optimistic caching in the MemWal SDK to reduce recall latency](https://github.com/MystenLabs/MemWal/issues/1164)** · Proposed · `performance-mitigation`
+
+- **Context:** Each chat turn that uses memory currently calls `recall()` and waits on the hosted relayer and Walrus path. Observed interactive recalls in this project have taken on the order of several seconds even when the user has injected no new facts.
+- **Problem:** That synchronous round-trip is the blocking cost of remote semantic recall. Application authors then add a separate encrypted cache (WalPen: Neon PostgreSQL in production, SQLite locally) for journal display, write recovery, and Telegram fallback. The cache is an application mitigation; it is not a substitute for Walrus as the memory source of record, and it splits operational state away from the SDK.
+- **Proposal:** Add an optional SDK client/edge cache for recall, with an explicit policy such as `strategy: 'cache-first' | 'network-only'`. `cache-first` would return short-lived cached ciphertext/metadata (target: under 200 ms) unless invalidated; `network-only` would preserve the current path. The cache must remain isolated per namespace and must not weaken consent or encryption assumptions.
+
+**[WalPen #4 — Blocking `remember()` / `waitForRememberJob()` versus serverless and Telegram webhook budgets](https://github.com/MystenLabs/MemWal/issues/1165)** · Proposed · `bug-report`
+
+- **Context:** [#277](https://github.com/MystenLabs/MemWal/issues/277), [#1048](https://github.com/MystenLabs/MemWal/issues/1048), and [#1049](https://github.com/MystenLabs/MemWal/issues/1049) address dApp recovery state (persisted job IDs, uncertain writes, receipt lookup). They do not change the SDK execution model. In MemWal 0.1.7, `remember()` waits for relayer acceptance (embedding and encryption) before returning a `job_id`; `waitForRememberJob()` then blocks until a confirmed Walrus blob receipt. End-to-end confirmation in this project has been observed on the order of tens of seconds.
+- **Problem:** Holding the request on that confirmation exceeds typical serverless defaults (Vercel’s hobby/default limit is 10 seconds). WalPen raises `api/index.ts` to `maxDuration: 300` and acknowledges Telegram webhooks only after an encrypted job is queued, then continues MemWal work under `waitUntil()`. That application pattern still occupies the function until the receipt arrives. If the worker dies mid-wait, Telegram may retry the update; WalPen deduplicates by `update_id`, but an unbounded or reclaimed worker can still re-enter paid recall and model work.
+- **Proposal:** Keep job allocation asynchronous at the SDK/relayer boundary: return HTTP 202 with a stable `job_id` in well under a second, without waiting for Mainnet confirmation. Add a completion signal the host can subscribe to (`onWriteComplete(job_id)` or a developer-configured callback) when the Walrus receipt is durable. Callers would persist the `job_id` and close the webhook/HTTP path without polling inside the original request.
+
+**[WalPen #5 — Client-side intent routing to skip redundant namespace recall](https://github.com/MystenLabs/MemWal/issues/1166)** · Proposed · `enhancement`
+
+- **Context:** Memory-backed chat currently issues a full `recall()` against the user namespace for every ordinary message and `/chat` question, including greetings and thanks that do not need retrieved memories.
+- **Problem:** Deep vector queries for those turns add relayer load, latency, and cost without changing the answer. WalPen can apply a timeout and a consented Neon cache fallback after a failed or slow recall; it cannot skip the remote call inside the SDK.
+- **Proposal:** Provide an optional, local intent gate (lightweight classifier or conservative pattern set) that runs before the relayer `recall()` endpoint. Trivial conversational turns would short-circuit and return an empty result set immediately. Non-trivial turns would use the existing remote path. The gate must fail open to remote recall when intent is uncertain, and must not invent memories.
 
 ## Evidence boundaries
 
