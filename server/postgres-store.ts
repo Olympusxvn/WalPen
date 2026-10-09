@@ -8,6 +8,7 @@ import type {
   UserRecord,
   WalletChallenge,
 } from "./repository.ts";
+import { TELEGRAM_MAX_ATTEMPTS } from "./repository.ts";
 import { encryptPayload, decryptPayload } from "./encryption.ts";
 import {
   decodeLease,
@@ -376,8 +377,20 @@ export class PostgresStore implements Repository {
     safeErrorCode: string,
   ): Promise<void> {
     await this.pool.query(
-      "UPDATE telegram_updates SET state='queued',available_at=$2,lease_until=NULL,safe_error_code=$3 WHERE update_id=$1 AND state='processing'",
-      [updateId, nextAttemptAt, telegramSafeErrorCode(safeErrorCode)],
+      `UPDATE telegram_updates SET
+         state=CASE WHEN attempts>=$5 THEN 'failed' ELSE 'queued' END,
+         available_at=CASE WHEN attempts>=$5 THEN available_at ELSE $2 END,
+         lease_until=NULL,
+         completed_at=CASE WHEN attempts>=$5 THEN $3 ELSE NULL END,
+         safe_error_code=$4
+       WHERE update_id=$1 AND state='processing'`,
+      [
+        updateId,
+        nextAttemptAt,
+        Date.now(),
+        telegramSafeErrorCode(safeErrorCode),
+        TELEGRAM_MAX_ATTEMPTS,
+      ],
     );
   }
   async insertTelegramEntry(

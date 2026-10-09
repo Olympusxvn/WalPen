@@ -32,14 +32,31 @@ const codeLifetimeMs = 10 * 60_000;
 const retryDelayMs = 30_000;
 const maxWriteCharacters = 4_000;
 const telegramTextLimit = 4_096;
+const cacheStopwords = new Set([
+  "the",
+  "and",
+  "for",
+  "you",
+  "your",
+  "là",
+  "của",
+  "và",
+  "một",
+  "này",
+]);
 
 export function telegramConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): TelegramChannelConfig | undefined {
   const botToken = env.TELEGRAM_BOT_TOKEN?.trim();
   const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET?.trim();
+  if (!botToken) {
+    console.warn(
+      "Telegram Bot Token is missing, skipping Telegram channel initialization.",
+    );
+    return undefined;
+  }
   if (
-    !botToken ||
     !webhookSecret ||
     !/^\d+:[A-Za-z0-9_-]+$/.test(botToken) ||
     !/^[A-Za-z0-9_-]{1,256}$/.test(webhookSecret)
@@ -185,13 +202,23 @@ export function createTelegramBot(
         await processChat(job, deps, config, bot);
       }
       await deps.store.finishTelegramUpdate(updateId, "done", Date.now());
-    } catch {
+    } catch (error) {
       try {
-        await deps.store.releaseTelegramUpdate(
-          updateId,
-          Date.now() + retryDelayMs,
-          "telegram_delivery_failed",
-        );
+        const status = httpStatus(error);
+        if (status === 400 || status === 403) {
+          await deps.store.finishTelegramUpdate(
+            updateId,
+            "failed",
+            Date.now(),
+            "telegram_chat_unavailable",
+          );
+        } else {
+          await deps.store.releaseTelegramUpdate(
+            updateId,
+            Date.now() + retryDelayMs,
+            "telegram_delivery_failed",
+          );
+        }
       } catch {
         // An expired processing lease remains recoverable if Neon is unavailable.
       }
@@ -232,11 +259,22 @@ function httpStatus(error: unknown, depth = 0): number | undefined {
   const value = error as {
     status?: unknown;
     statusCode?: unknown;
+    code?: unknown;
     cause?: unknown;
   };
   const raw = value.status ?? value.statusCode;
   if (typeof raw === "number" && Number.isInteger(raw)) return raw;
   if (typeof raw === "string" && /^\d{3}$/.test(raw)) return Number(raw);
+  if (
+    typeof value.code === "number" &&
+    Number.isInteger(value.code) &&
+    value.code >= 400 &&
+    value.code <= 599
+  )
+    return value.code;
+  const nested = (value as { response?: { error_code?: unknown } }).response
+    ?.error_code;
+  if (typeof nested === "number" && Number.isInteger(nested)) return nested;
   if (value.cause && value.cause !== error)
     return httpStatus(value.cause, depth + 1);
   return undefined;
@@ -266,7 +304,7 @@ function normalizedWords(text: string): string[] {
     .normalize("NFKC")
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
+    .filter((word) => word.length > 2 && !cacheStopwords.has(word));
 }
 function cachedSources(entries: Entry[], query: string): Source[] {
   const queryWords = normalizedWords(query);
@@ -513,9 +551,10 @@ async function processWrite(
     );
   } catch {
     try {
-      await deps.store.releaseTelegramUpdate(
+      await deps.store.finishTelegramUpdate(
         updateId,
-        Date.now() + retryDelayMs,
+        "failed",
+        Date.now(),
         "telegram_entry_persistence_failed",
       );
     } catch {
@@ -531,7 +570,7 @@ async function processWrite(
         ),
       );
     } catch {
-      // The queued update remains recoverable and will retry after its backoff.
+      // The failed update is not retried; the user can send the note again.
     }
     return;
   }

@@ -28,6 +28,7 @@ export type TelegramInboundJob = {
   text: string;
   language: "en" | "vi";
 };
+export const TELEGRAM_MAX_ATTEMPTS = 5;
 export interface Repository {
   addWalletChallenge(challenge: WalletChallenge): Result<void>;
   getWalletChallenge(

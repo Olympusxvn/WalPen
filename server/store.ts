@@ -10,6 +10,7 @@ import type {
   UserRecord,
   WalletChallenge,
 } from "./repository.ts";
+import { TELEGRAM_MAX_ATTEMPTS } from "./repository.ts";
 import { encryptPayload, decryptPayload } from "./encryption.ts";
 import {
   decodeLease,
@@ -383,11 +384,23 @@ export class Store implements Repository {
     nextAttemptAt: number,
     safeErrorCode: string,
   ): void {
+    const now = Date.now();
     this.db
       .prepare(
-        "UPDATE telegram_updates SET state='queued',available_at=?,lease_until=NULL,safe_error_code=? WHERE update_id=? AND state='processing'",
+        `UPDATE telegram_updates SET
+           state=CASE WHEN attempts>=${TELEGRAM_MAX_ATTEMPTS} THEN 'failed' ELSE 'queued' END,
+           available_at=CASE WHEN attempts>=${TELEGRAM_MAX_ATTEMPTS} THEN available_at ELSE ? END,
+           lease_until=NULL,
+           completed_at=CASE WHEN attempts>=${TELEGRAM_MAX_ATTEMPTS} THEN ? ELSE NULL END,
+           safe_error_code=?
+         WHERE update_id=? AND state='processing'`,
       )
-      .run(nextAttemptAt, telegramSafeErrorCode(safeErrorCode), updateId);
+      .run(
+        nextAttemptAt,
+        now,
+        telegramSafeErrorCode(safeErrorCode),
+        updateId,
+      );
   }
   insertTelegramEntry(
     updateId: number,

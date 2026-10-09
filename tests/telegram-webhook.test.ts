@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { Telegram } from "telegraf";
+import { Telegram, TelegramError } from "telegraf";
 import request from "supertest";
 import { createApp } from "../server/app.ts";
+import { createTelegramBot } from "../server/channels/telegram.ts";
 import type { ChatModel, Source } from "../server/llm.ts";
 import { budgetMemoryContext } from "../server/memory-context.ts";
 import type { MemoryGateway, MemoryRecall } from "../server/memory.ts";
@@ -686,8 +687,9 @@ test("write reports a persistence failure without claiming the entry was saved",
     const queued = store.db
       .prepare("SELECT state, safe_error_code FROM telegram_updates WHERE update_id=113")
       .get() as { state: string; safe_error_code: string };
-    assert.equal(queued.state, "queued");
+    assert.equal(queued.state, "failed");
     assert.equal(queued.safe_error_code, "telegram_entry_persistence_failed");
+    assert.deepEqual(store.pendingTelegramUpdateIds(Date.now(), 10), []);
   } finally {
     restore();
     store.db.close();
@@ -1480,6 +1482,144 @@ test("telegram replies stay within 4096 code points and retain notices, emoji, a
     assert.ok(fallback.every((text) => codePoints(text) <= 4096 && codePoints(text) > 0));
     assert.ok(joined.indexOf(cacheNotice.en) < joined.indexOf(tulip));
     assert.ok(joined.indexOf(tulip) < joined.indexOf("Source 1 · Walrus blob:"));
+  } finally {
+    restore();
+    store.db.close();
+  }
+});
+
+function deliveryBot(store: Store) {
+  return createTelegramBot(
+    {
+      store,
+      memory: writeMemory(),
+      model,
+      background() {},
+      recallMaxDistance: 0.7,
+      retryWindowMs: 0,
+    },
+    config,
+  );
+}
+function enqueueStart(store: Store, updateId: number) {
+  return store.enqueueTelegramUpdate(
+    {
+      updateId,
+      telegramId: "123456789",
+      chatId: "123456789",
+      text: "/start",
+      language: "en",
+    },
+    Date.now(),
+  );
+}
+function reopenTelegramJob(store: Store, updateId: number) {
+  store.db
+    .prepare(
+      "UPDATE telegram_updates SET available_at=0, lease_until=0 WHERE update_id=?",
+    )
+    .run(updateId);
+}
+
+test("telegram jobs fail after five delivery attempts instead of retrying forever", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  linkedStore(store);
+  const bot = deliveryBot(store);
+  const restore = withSendMessage(async () => {
+    throw new Error("delivery exploded");
+  });
+  try {
+    enqueueStart(store, 301);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      reopenTelegramJob(store, 301);
+      await assert.rejects(() => bot.processTelegramJob(301));
+    }
+    const row = store.db
+      .prepare(
+        "SELECT state, attempts, safe_error_code FROM telegram_updates WHERE update_id=301",
+      )
+      .get() as { state: string; attempts: number; safe_error_code: string };
+    assert.equal(row.attempts, 5);
+    assert.equal(row.state, "failed");
+    assert.equal(row.safe_error_code, "telegram_delivery_failed");
+    assert.deepEqual(store.pendingTelegramUpdateIds(Date.now(), 10), []);
+    reopenTelegramJob(store, 301);
+    await bot.processTelegramJob(301);
+    assert.equal(
+      (
+        store.db
+          .prepare("SELECT state FROM telegram_updates WHERE update_id=301")
+          .get() as { state: string }
+      ).state,
+      "failed",
+    );
+  } finally {
+    restore();
+    store.db.close();
+  }
+});
+
+test("telegram 403 sendMessage finishes the job as failed without further retries", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  linkedStore(store);
+  const bot = deliveryBot(store);
+  const restore = withSendMessage(async () => {
+    throw new TelegramError({
+      error_code: 403,
+      description: "Forbidden: bot was blocked by the user",
+    });
+  });
+  try {
+    enqueueStart(store, 302);
+    await assert.rejects(() => bot.processTelegramJob(302));
+    const row = store.db
+      .prepare(
+        "SELECT state, attempts, safe_error_code FROM telegram_updates WHERE update_id=302",
+      )
+      .get() as { state: string; attempts: number; safe_error_code: string };
+    assert.equal(row.attempts, 1);
+    assert.equal(row.state, "failed");
+    assert.equal(row.safe_error_code, "telegram_chat_unavailable");
+    assert.deepEqual(store.pendingTelegramUpdateIds(Date.now(), 10), []);
+  } finally {
+    restore();
+    store.db.close();
+  }
+});
+
+test("stopword-only recall fallback does not cite unrelated cached blobs", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  linkedStore(store);
+  store.insert(
+    journal("stopwords", {
+      memory: "the lake and your bicycle là của và một này",
+      blobId: "cache-stopwords",
+    }),
+  );
+  const calls: Source[][] = [];
+  const f = fixture({
+    store,
+    memory: chatMemory(async () => {
+      throw Object.assign(new Error("relayer unavailable"), { status: 502 });
+    }),
+    model: answeringModel(async (_question, _history, sources) => {
+      calls.push(sources);
+      return "No remembered facts.";
+    }),
+  });
+  const sent: string[] = [];
+  const restore = withSendMessage(async (_chatId, text) => {
+    sent.push(text);
+    return {};
+  });
+  try {
+    await postUpdate(f.app, 303, "the and for you your là của và một này").expect(
+      200,
+    );
+    await Promise.all(f.jobs);
+    assert.deepEqual(calls, [[]]);
+    assert.ok(sent.join("").startsWith(emptyRecallNotice.en));
+    assert.equal(sent.join("").includes("cache-stopwords"), false);
   } finally {
     restore();
     store.db.close();
