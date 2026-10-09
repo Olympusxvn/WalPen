@@ -1,7 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { Telegraf } from "telegraf";
-import type { ChatModel } from "../llm.ts";
-import type { MemoryGateway } from "../memory.ts";
+import type { ChatModel, Source } from "../llm.ts";
+import { budgetMemoryContext } from "../memory-context.ts";
+import type { MemoryGateway, MemoryRecall } from "../memory.ts";
+import { selectRecallContext } from "../recall.ts";
 import type { Repository, TelegramInboundJob } from "../repository.ts";
 import { hash, type Entry } from "../store.ts";
 import { synchronize } from "../synchronize.ts";
@@ -29,6 +31,7 @@ const telegramLeaseMs = 360_000;
 const codeLifetimeMs = 10 * 60_000;
 const retryDelayMs = 30_000;
 const maxWriteCharacters = 4_000;
+const telegramTextLimit = 4_096;
 
 export function telegramConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -70,6 +73,14 @@ function writeBody(text: string): string {
     .trim()
     .replace(/^\/write(?:@[\w_]+)?/i, "")
     .trim();
+}
+function isChat(text: string): boolean {
+  return /^\/chat(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+function chatQuestion(text: string): string {
+  const trimmed = text.trim();
+  if (!isChat(trimmed)) return trimmed;
+  return trimmed.replace(/^\/chat(?:@[\w_]+)?/i, "").trim();
 }
 function localized(job: TelegramInboundJob, en: string, vi: string): string {
   return job.language === "en" ? en : vi;
@@ -171,14 +182,7 @@ export function createTelegramBot(
       } else if (isWrite(job.text)) {
         await processWrite(job, updateId, deps, bot);
       } else {
-        await bot.telegram.sendMessage(
-          job.chatId,
-          localized(
-            job,
-            "I’m getting WalPen ready. Send /start to connect your Telegram account.",
-            "WalPen đang khởi động. Gửi /start để liên kết tài khoản Telegram.",
-          ),
-        );
+        await processChat(job, deps, config, bot);
       }
       await deps.store.finishTelegramUpdate(updateId, "done", Date.now());
     } catch {
@@ -209,6 +213,265 @@ export function createTelegramBot(
   });
 
   return Object.assign(bot, { processTelegramJob, resumeTelegramJobs });
+}
+
+const transientNetworkCodes = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "ECONNABORTED",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+  "UND_ERR_HEADERS_TIMEOUT",
+]);
+
+function httpStatus(error: unknown, depth = 0): number | undefined {
+  if (!error || typeof error !== "object" || depth > 2) return undefined;
+  const value = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    cause?: unknown;
+  };
+  const raw = value.status ?? value.statusCode;
+  if (typeof raw === "number" && Number.isInteger(raw)) return raw;
+  if (typeof raw === "string" && /^\d{3}$/.test(raw)) return Number(raw);
+  if (value.cause && value.cause !== error)
+    return httpStatus(value.cause, depth + 1);
+  return undefined;
+}
+function networkCode(error: unknown, depth = 0): string | undefined {
+  if (!error || typeof error !== "object" || depth > 2) return undefined;
+  const value = error as { code?: unknown; cause?: unknown };
+  if (typeof value.code === "string") return value.code;
+  if (value.cause && value.cause !== error)
+    return networkCode(value.cause, depth + 1);
+  return undefined;
+}
+function isTransientRecallError(error: unknown): boolean {
+  const status = httpStatus(error);
+  if (status === 502 || status === 503 || status === 504) return true;
+  if (status !== undefined) return false;
+  if (!error || typeof error !== "object") return false;
+  const name = (error as { name?: string }).name;
+  if (name === "TimeoutError" || name === "AbortError") return true;
+  const code = networkCode(error);
+  if (code && transientNetworkCodes.has(code)) return true;
+  const message = (error as { message?: unknown }).message;
+  return message === "fetch failed" || message === "recall_timeout";
+}
+function normalizedWords(text: string): string[] {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+}
+function cachedSources(entries: Entry[], query: string): Source[] {
+  const queryWords = normalizedWords(query);
+  const ranked = entries
+    .filter(
+      (entry) =>
+        entry.consent === true &&
+        entry.status === "synced" &&
+        !entry.retired &&
+        typeof entry.blobId === "string" &&
+        entry.blobId.length > 0,
+    )
+    .map((entry) => {
+      const haystack = new Set(
+        normalizedWords(`${entry.title}\n${entry.memory}`),
+      );
+      const matched = queryWords.filter((word) => haystack.has(word)).length;
+      return {
+        entry,
+        score: queryWords.length ? matched / queryWords.length : 0,
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.entry.createdAt.localeCompare(a.entry.createdAt),
+    );
+  return budgetMemoryContext(
+    ranked.map(({ entry }) => ({
+      id: entry.id,
+      title: entry.title || "Một trang nhật ký",
+      text: entry.memory,
+      date: entry.occurredAt || entry.createdAt,
+      blobId: entry.blobId!,
+    })),
+  ).sources;
+}
+function recallWithTimeout(
+  recall: MemoryGateway["recall"],
+  userId: string,
+  query: string,
+  timeoutMs: number,
+): Promise<MemoryRecall> {
+  // recall() accepts no AbortSignal, so this only discards a late result.
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      const error = new Error("recall_timeout");
+      error.name = "TimeoutError";
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([recall(userId, query), timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+function codePointLength(text: string): number {
+  return Array.from(text).length;
+}
+function splitCodePoints(text: string, limit = telegramTextLimit): string[] {
+  const points = Array.from(text);
+  if (!points.length) return [];
+  const parts: string[] = [];
+  for (let index = 0; index < points.length; index += limit)
+    parts.push(points.slice(index, index + limit).join(""));
+  return parts;
+}
+function packLines(lines: string[], limit = telegramTextLimit): string[] {
+  const messages: string[] = [];
+  let current = "";
+  for (const line of lines) {
+    const next = current ? `${current}\n${line}` : line;
+    if (codePointLength(next) <= limit) {
+      current = next;
+      continue;
+    }
+    if (current) messages.push(current);
+    if (codePointLength(line) <= limit) current = line;
+    else {
+      messages.push(...splitCodePoints(line, limit));
+      current = "";
+    }
+  }
+  if (current) messages.push(current);
+  return messages;
+}
+async function sendTexts(bot: Telegraf, chatId: string, texts: string[]) {
+  for (const text of texts) {
+    if (text) await bot.telegram.sendMessage(chatId, text);
+  }
+}
+function sourceCards(sources: Source[]): string[] {
+  return sources.map(
+    (source, index) => `Source ${index + 1} · Walrus blob: ${source.blobId}`,
+  );
+}
+async function deliverAnswer(
+  bot: Telegraf,
+  chatId: string,
+  prefix: string | undefined,
+  answer: string,
+  sources: Source[],
+) {
+  const body = prefix ? (answer ? `${prefix}\n\n${answer}` : prefix) : answer;
+  await sendTexts(bot, chatId, splitCodePoints(body));
+  await sendTexts(bot, chatId, packLines(sourceCards(sources)));
+}
+async function processChat(
+  job: TelegramInboundJob,
+  deps: TelegramChannelDependencies,
+  config: TelegramChannelConfig,
+  bot: Telegraf,
+): Promise<void> {
+  const question = chatQuestion(job.text);
+  if (isChat(job.text) && !question) {
+    await bot.telegram.sendMessage(
+      job.chatId,
+      localized(
+        job,
+        "Usage: /chat followed by a question.",
+        "Cách dùng: /chat kèm một câu hỏi.",
+      ),
+    );
+    return;
+  }
+  const userId = await deps.store.telegramUserId(job.telegramId);
+  if (!userId) {
+    await bot.telegram.sendMessage(
+      job.chatId,
+      localized(
+        job,
+        "Connect your WalPen account first: send /start for a one-time link code.",
+        "Hãy liên kết tài khoản WalPen trước: gửi /start để nhận mã dùng một lần.",
+      ),
+    );
+    return;
+  }
+  if (!deps.model.configured) {
+    await bot.telegram.sendMessage(
+      job.chatId,
+      localized(
+        job,
+        "WalPen can’t answer yet because the AI model is not configured.",
+        "WalPen chưa thể trả lời vì mô hình AI chưa được cấu hình.",
+      ),
+    );
+    return;
+  }
+  let sources: Source[] = [];
+  let prefix: string | undefined;
+  try {
+    const remote = await recallWithTimeout(
+      (id, query) => deps.memory.recall(id, query),
+      userId,
+      question,
+      config.recallTimeoutMs,
+    );
+    sources = selectRecallContext(
+      remote,
+      await deps.store.list(userId),
+      deps.recallMaxDistance,
+    ).sources;
+  } catch (error) {
+    if (!isTransientRecallError(error)) {
+      await bot.telegram.sendMessage(
+        job.chatId,
+        localized(
+          job,
+          "WalPen couldn’t read your memories just now. Please try again shortly.",
+          "WalPen chưa đọc được ký ức lúc này. Vui lòng thử lại sau.",
+        ),
+      );
+      return;
+    }
+    sources = cachedSources(await deps.store.list(userId), question);
+    prefix = sources.length
+      ? localized(
+          job,
+          "Remote recall is unavailable. The encrypted cache supplied the cited Walrus blobs.",
+          "Không truy xuất được ký ức từ xa. Bộ nhớ đệm đã mã hóa cung cấp các blob Walrus được trích dẫn.",
+        )
+      : localized(
+          job,
+          "Remote recall is unavailable. No encrypted-cache memory matched this question, so this answer does not claim remembered facts.",
+          "Không truy xuất được ký ức từ xa. Không có ký ức trong bộ nhớ đệm khớp câu hỏi, nên câu trả lời này không khẳng định sự kiện đã nhớ.",
+        );
+  }
+  let answer: string;
+  try {
+    answer = await deps.model.answer(question, [], sources, job.language);
+  } catch {
+    await bot.telegram.sendMessage(
+      job.chatId,
+      localized(
+        job,
+        "WalPen couldn’t complete this answer. Please try again shortly.",
+        "WalPen chưa thể hoàn tất câu trả lời. Vui lòng thử lại sau.",
+      ),
+    );
+    return;
+  }
+  await deliverAnswer(bot, job.chatId, prefix, answer, sources);
 }
 
 async function processWrite(
