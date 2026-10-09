@@ -117,6 +117,11 @@ try {
   await page
     .getByText("That link code is too long.", { exact: true })
     .waitFor();
+  await page.getByRole("button", { name: "Link account", exact: true }).click();
+  await page
+    .getByText("That link code is too long.", { exact: true })
+    .waitFor();
+  assert.deepEqual(postedCodes, []);
 
   await code.fill("   ");
   await page.getByRole("button", { name: "Link account", exact: true }).click();
@@ -149,6 +154,30 @@ try {
   await page
     .getByText("Đã liên kết tài khoản Telegram.", { exact: true })
     .waitFor();
+  await page.setViewportSize({ width: 360, height: 800 });
+  const headerFit = await page.locator(".topbar").evaluate((el) => {
+    const link = el.querySelector(".telegram-link");
+    const linkBox = link.getBoundingClientRect();
+    const bar = el.getBoundingClientRect();
+    return {
+      overflow: el.scrollWidth - el.clientWidth,
+      linkRight: linkBox.right,
+      linkLeft: linkBox.left,
+      barRight: bar.right,
+      barLeft: bar.left,
+    };
+  });
+  assert.ok(headerFit.overflow <= 1, `header overflow ${headerFit.overflow}`);
+  assert.ok(
+    headerFit.linkRight - headerFit.linkLeft >= 48,
+    `header link width ${headerFit.linkRight - headerFit.linkLeft}`,
+  );
+  assert.ok(headerFit.linkLeft >= headerFit.barLeft - 1);
+  assert.ok(
+    headerFit.linkRight <= headerFit.barRight + 1,
+    `header link extends to ${headerFit.linkRight}`,
+  );
+  await page.setViewportSize({ width: 1280, height: 1000 });
 
   guest = true;
   linked = false;

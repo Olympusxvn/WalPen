@@ -71,7 +71,10 @@ Set these variables in the server environment. In Vercel, add them under the Wal
 TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
 TELEGRAM_WEBHOOK_SECRET=YOUR_RANDOM_WEBHOOK_SECRET
 TELEGRAM_RECALL_TIMEOUT_MS=8000
+VITE_TELEGRAM_BOT_URL=
 ```
+
+`VITE_TELEGRAM_BOT_URL` is the frontend bot destination used by the Telegram button in the web app. It is not a server secret. Leave it empty; the button then opens `https://t.me`. Do not put a bot token in this variable.
 
 Set Telegram's webhook once to the public HTTPS endpoint. In PowerShell, set the two secret values in the current shell first, then run:
 

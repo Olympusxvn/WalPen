@@ -1813,12 +1813,27 @@ main {
   margin-right: 20px;
 }
 @media (max-width: 650px) {
+  .topbar {
+    height: auto;
+    min-height: 65px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
   .topbar > .language-switch {
     margin-left: auto;
     margin-right: 12px;
   }
   .topbar > .telegram-link {
+    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 38%;
     margin-left: 8px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+    font-size: 9px;
+    text-align: end;
   }
   .language-switch button {
     min-height: 30px;

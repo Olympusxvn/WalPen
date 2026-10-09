@@ -210,6 +210,7 @@ export default function App() {
       "" | "empty" | "long" | "invalid" | "request"
     >(""),
     [telegramJustLinked, setTelegramJustLinked] = useState(false);
+  const telegramTooLong = useRef(false);
   const chatEnd = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const address = walletAccount?.address.toLowerCase() || null;
@@ -256,6 +257,7 @@ export default function App() {
   }
   useEffect(() => {
     if (!user) {
+      telegramTooLong.current = false;
       setTelegramStatus(null);
       setTelegramCode("");
       setTelegramError("");
@@ -415,13 +417,14 @@ export default function App() {
   async function linkTelegram(event: FormEvent) {
     event.preventDefault();
     const code = telegramCode.trim();
-    if (!code) {
-      setTelegramError("empty");
+    if (telegramTooLong.current || code.length > 128) {
+      telegramTooLong.current = true;
+      setTelegramError("long");
       setTelegramJustLinked(false);
       return;
     }
-    if (code.length > 128) {
-      setTelegramError("long");
+    if (!code) {
+      setTelegramError("empty");
       setTelegramJustLinked(false);
       return;
     }
@@ -440,10 +443,12 @@ export default function App() {
   }
   function onTelegramCode(value: string) {
     if (value.length > 128) {
+      telegramTooLong.current = true;
       setTelegramCode(value.slice(0, 128));
       setTelegramError("long");
       return;
     }
+    telegramTooLong.current = false;
     setTelegramCode(value);
     setTelegramError("");
   }
