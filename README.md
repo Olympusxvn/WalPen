@@ -29,7 +29,7 @@ English · Tiếng Việt · Sui wallet sign-in · Walrus Memory · Cloud AI / l
 
 WalPen is a journaling app for people who want continuity between conversations and a clear choice about which parts of their writing a chatbot may recall. Users write their own entries, select an editable memory excerpt, and receive answers with references to relevant saved pages.
 
-**Storage and consent are separate:** saving uploads the journal record to Walrus Mainnet. Approval determines which excerpt may enter the chatbot's context. Chat messages are not automatically saved as memories.
+**Storage and consent are separate:** saving persists the journal revision and memory content to Walrus Mainnet. When memory is enabled, WalPen retrieves approved excerpts from Walrus for the chatbot's context; approval controls what may be used, and chat messages are not automatically saved as memories. Neon also holds an AES-256-GCM-encrypted application copy of journal data, plus account, session and write-job state, so the web app can display entries and recover interrupted writes. Neon is not the source used for memory recall.
 
 **Current status — 30 September 2026:** the frontend and API run on Vercel with Neon persistence. Slush currently shows a **“Malicious website”** warning during wallet testing. The owner has submitted a review request; clearance has not been confirmed. Do not bypass the warning. See the [review notes](docs/SLUSH-REVIEW.md) and [changelog](CHANGELOG.md).
 
@@ -100,7 +100,7 @@ Switching the interface language does not translate or overwrite journal content
 ```mermaid
 flowchart TD
     UI[React interface on Vercel] -->|HTTPS and signed-wallet session| API[Vercel Node API]
-    API <-->|Journal revisions and job state| DB[Neon encrypted journal cache]
+    API <-->|Encrypted app copy, accounts, sessions and job state| DB[Neon]
     API -->|Remember and recall in user namespace| MW[MemWal relayer]
     MW <-->|Encrypted memory blobs| WAL[Walrus Mainnet]
     API -->|Chat and approved recalled excerpts| LLM[Gemini or OpenAI with personal key]
@@ -118,7 +118,7 @@ flowchart TD
 | [Cloud store](server/postgres-store.ts) / [local store](server/store.ts) | Encrypted journal payloads, accounts, sessions and recovery state |
 | [Wallet sign-in](server/wallet-auth.ts) | Sui personal signatures, browser-bound single-use challenges, linking to existing accounts |
 
-The API derives namespaces from authenticated user IDs. A verified wallet maps to a stable ID; an address supplied by the browser alone cannot authorize recall. After recall, the API validates blob identity, the active revision, consent and the approved excerpt before passing context to the selected model. It checks selected sources again after generation to catch edits or withdrawals made while the model was answering.
+The API derives namespaces from authenticated user IDs. A verified wallet maps to a stable ID; an address supplied by the browser alone cannot authorize recall. Walrus is the retrieval source for chatbot memories. Neon keeps an encrypted application copy of journal data and durable account/session/write-job state for the web app and recovery; it does not supply recalled memories. After Walrus recall, the API validates blob identity, the active revision, consent and the approved excerpt before passing context to the selected model. It checks selected sources again after generation to catch edits or withdrawals made while the model was answering.
 
 The 768-token budget covers the serialized memory context only. It uses MemWal's character-based estimate, not exact model tokenization or a limit on the entire prompt.
 
