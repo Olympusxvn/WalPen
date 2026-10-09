@@ -181,8 +181,6 @@ const linkFirstNotice =
   "Connect your WalPen account first: send /start for a one-time link code.";
 function journal(id: string, overrides: Partial<Entry> = {}): Entry {
   return {
-    id,
-    userId: "telegram-owner",
     rootId: id,
     revision: 1,
     supersedes: null,

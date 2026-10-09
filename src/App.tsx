@@ -1,5 +1,5 @@
 import { t, getLocale, useLanguage } from "./i18n";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { CloudAISettings, type AICredentials } from "./CloudAISettings";
 import { WalletLogin } from "./WalletLogin";
 import { recallNotices, type RecallDiagnostics } from "../shared/recall";
@@ -66,6 +66,14 @@ const nav = [
   { id: "memories", label: "Điều được nhớ", icon: Sprout },
   { id: "how", label: "Cách hoạt động", icon: Workflow },
 ] as const;
+declare global {
+  interface ImportMetaEnv {
+    readonly VITE_TELEGRAM_BOT_URL?: string;
+  }
+  interface ImportMeta {
+    readonly env: ImportMetaEnv;
+  }
+}
 const moods = [
   { icon: "🌿", label: "Bình yên" },
   { icon: "☀️", label: "Vui vẻ" },
@@ -111,6 +119,18 @@ function Status({ entry }: { entry: Entry }) {
         </>
       )}
     </span>
+  );
+}
+function TelegramChatLink() {
+  return (
+    <a
+      className="text-button telegram-link"
+      href={import.meta.env.VITE_TELEGRAM_BOT_URL || "https://t.me"}
+      target="_blank"
+      rel="noreferrer noopener"
+    >
+      {t("Trò chuyện qua Telegram")}
+    </a>
   );
 }
 function Botanical() {
@@ -181,6 +201,15 @@ export default function App() {
     [input, setInput] = useState(""),
     [thinking, setThinking] = useState(false),
     [useMemory, setUseMemory] = useState(true);
+  const [telegramStatus, setTelegramStatus] = useState<{
+      linked: boolean;
+      telegramId?: string;
+    } | null>(null),
+    [telegramCode, setTelegramCode] = useState(""),
+    [telegramError, setTelegramError] = useState<
+      "" | "empty" | "long" | "invalid" | "request"
+    >(""),
+    [telegramJustLinked, setTelegramJustLinked] = useState(false);
   const chatEnd = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const address = walletAccount?.address.toLowerCase() || null;
@@ -225,6 +254,28 @@ export default function App() {
       else sessionStorage.removeItem("walpen-ai-" + user.id);
     } catch {}
   }
+  useEffect(() => {
+    if (!user) {
+      setTelegramStatus(null);
+      setTelegramCode("");
+      setTelegramError("");
+      setTelegramJustLinked(false);
+      return;
+    }
+    if (page !== "settings") return;
+    let active = true;
+    api("/telegram/status")
+      .then((status) => {
+        if (!active) return;
+        setTelegramStatus((current) => (current?.linked ? current : status));
+      })
+      .catch(() => {
+        if (active) setTelegramError("request");
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id, page]);
   useEffect(() => {
     api("/session")
       .then((d) => {
@@ -360,6 +411,41 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+  async function linkTelegram(event: FormEvent) {
+    event.preventDefault();
+    const code = telegramCode.trim();
+    if (!code) {
+      setTelegramError("empty");
+      setTelegramJustLinked(false);
+      return;
+    }
+    if (code.length > 128) {
+      setTelegramError("long");
+      setTelegramJustLinked(false);
+      return;
+    }
+    setTelegramError("");
+    try {
+      await api("/telegram/link", { code });
+      setTelegramCode("");
+      setTelegramJustLinked(true);
+      setTelegramStatus(await api("/telegram/status"));
+    } catch (e: any) {
+      setTelegramJustLinked(false);
+      setTelegramError(
+        e?.message === "Link code is invalid or expired." ? "invalid" : "request",
+      );
+    }
+  }
+  function onTelegramCode(value: string) {
+    if (value.length > 128) {
+      setTelegramCode(value.slice(0, 128));
+      setTelegramError("long");
+      return;
+    }
+    setTelegramCode(value);
+    setTelegramError("");
   }
   async function send(text = input) {
     if (!text.trim() || thinking) return;
@@ -577,6 +663,7 @@ export default function App() {
               EN
             </button>
           </div>
+          <TelegramChatLink />
           <button
             className="mobile-account icon-button"
             aria-label={t("Tài khoản")}
@@ -781,13 +868,16 @@ export default function App() {
                           "WalPen có thể nhớ những điều bạn cho phép, để lần sau mình không phải bắt đầu lại.",
                         )}
                       </p>
-                      <button
-                        className="text-button"
-                        onClick={() => go("talk")}
-                      >
-                        {t("Ngồi xuống, trò chuyện ")}
-                        <ArrowRight size={15} />
-                      </button>
+                      <div className="companion-actions">
+                        <button
+                          className="text-button"
+                          onClick={() => go("talk")}
+                        >
+                          {t("Ngồi xuống, trò chuyện ")}
+                          <ArrowRight size={15} />
+                        </button>
+                        <TelegramChatLink />
+                      </div>
                     </div>
                     <div className="privacy-note">
                       <ShieldCheck size={17} />
@@ -1269,6 +1359,62 @@ export default function App() {
                           );
                         }}
                       />
+                    )}
+                  </section>
+                )}
+                {user && (
+                  <section className="settings-card">
+                    <h2>Telegram</h2>
+                    <p>
+                      {t(
+                        "Telegram xử lý tin nhắn đã gửi. Nhà cung cấp AI đã cấu hình xử lý hội thoại.",
+                      )}
+                    </p>
+                    {telegramStatus?.linked ? (
+                      <>
+                        <p role="status">
+                          {telegramJustLinked
+                            ? t("Đã liên kết tài khoản Telegram.")
+                            : t("Đã liên kết Telegram.")}
+                        </p>
+                        {telegramStatus.telegramId && (
+                          <p>{telegramStatus.telegramId}</p>
+                        )}
+                      </>
+                    ) : (
+                      <form
+                        className="telegram-link-form"
+                        onSubmit={(event) => void linkTelegram(event)}
+                      >
+                        <label>
+                          {t("Mã liên kết")}
+                          <input
+                            value={telegramCode}
+                            autoComplete="off"
+                            spellCheck={false}
+                            onChange={(event) =>
+                              onTelegramCode(event.target.value)
+                            }
+                          />
+                        </label>
+                        {telegramError === "empty" && (
+                          <p role="alert">{t("Hãy nhập mã liên kết.")}</p>
+                        )}
+                        {telegramError === "long" && (
+                          <p role="alert">{t("Mã liên kết quá dài.")}</p>
+                        )}
+                        {telegramError === "invalid" && (
+                          <p role="alert">
+                            {t("Mã liên kết không hợp lệ hoặc đã hết hạn.")}
+                          </p>
+                        )}
+                        {telegramError === "request" && (
+                          <p role="alert">{t("Không thể thực hiện yêu cầu.")}</p>
+                        )}
+                        <button className="secondary" type="submit">
+                          {t("Liên kết tài khoản")}
+                        </button>
+                      </form>
                     )}
                   </section>
                 )}
