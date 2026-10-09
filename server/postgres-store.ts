@@ -30,7 +30,7 @@ function normalizeTelegramInbound(
     !/^\d{1,24}$/.test(telegramId) ||
     !/^-?\d{1,24}$/.test(chatId) ||
     !text.trim() ||
-    text.length > 4096 ||
+    Array.from(text).length > 4096 ||
     (input.language !== "en" && input.language !== "vi")
   )
     throw new Error("Invalid Telegram update");

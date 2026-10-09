@@ -1,9 +1,10 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Telegraf } from "telegraf";
 import type { ChatModel } from "../llm.ts";
 import type { MemoryGateway } from "../memory.ts";
 import type { Repository, TelegramInboundJob } from "../repository.ts";
-import { hash } from "../store.ts";
+import { hash, type Entry } from "../store.ts";
+import { synchronize } from "../synchronize.ts";
 
 export interface TelegramChannelConfig {
   botToken: string;
@@ -27,6 +28,7 @@ export type TelegramBot = Telegraf & {
 const telegramLeaseMs = 360_000;
 const codeLifetimeMs = 10 * 60_000;
 const retryDelayMs = 30_000;
+const maxWriteCharacters = 4_000;
 
 export function telegramConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -60,6 +62,41 @@ function languageFor(languageCode?: string): "en" | "vi" {
 function isStart(text: string): boolean {
   return /^\/start(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
 }
+function isWrite(text: string): boolean {
+  return /^\/write(?:@[\w_]+)?(?:\s|$)/i.test(text.trim());
+}
+function writeBody(text: string): string {
+  return text
+    .trim()
+    .replace(/^\/write(?:@[\w_]+)?/i, "")
+    .trim();
+}
+function localized(job: TelegramInboundJob, en: string, vi: string): string {
+  return job.language === "en" ? en : vi;
+}
+function writeEntry(userId: string, body: string): Entry {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  return {
+    id,
+    userId,
+    rootId: id,
+    revision: 1,
+    supersedes: null,
+    title: "Telegram journal",
+    body,
+    memory: body,
+    mood: "🌿",
+    consent: true,
+    createdAt: now,
+    occurredAt: now,
+    status: "queued",
+    jobId: null,
+    blobId: null,
+    error: null,
+    retired: false,
+  };
+}
 export function telegramJobFromUpdate(
   update: unknown,
 ): TelegramInboundJob | undefined {
@@ -91,7 +128,7 @@ function safeTelegramJob(input: unknown): TelegramInboundJob | undefined {
     !/^-?\d{1,24}$/.test(String(value.chatId)) ||
     typeof value.text !== "string" ||
     !value.text.trim() ||
-    value.text.length > 4096 ||
+    Array.from(value.text).length > 4096 ||
     (value.language !== "en" && value.language !== "vi")
   )
     return undefined;
@@ -126,12 +163,23 @@ export function createTelegramBot(
     );
     if (!job) return;
     try {
-      const message = isStart(job.text)
-        ? await startMessage(job, deps.store, config, now)
-        : job.language === "en"
-          ? "I’m getting WalPen ready. Send /start to connect your Telegram account."
-          : "WalPen đang khởi động. Gửi /start để liên kết tài khoản Telegram.";
-      await bot.telegram.sendMessage(job.chatId, message);
+      if (isStart(job.text)) {
+        await bot.telegram.sendMessage(
+          job.chatId,
+          await startMessage(job, deps.store, config, now),
+        );
+      } else if (isWrite(job.text)) {
+        await processWrite(job, updateId, deps, bot);
+      } else {
+        await bot.telegram.sendMessage(
+          job.chatId,
+          localized(
+            job,
+            "I’m getting WalPen ready. Send /start to connect your Telegram account.",
+            "WalPen đang khởi động. Gửi /start để liên kết tài khoản Telegram.",
+          ),
+        );
+      }
       await deps.store.finishTelegramUpdate(updateId, "done", Date.now());
     } catch {
       try {
@@ -161,6 +209,88 @@ export function createTelegramBot(
   });
 
   return Object.assign(bot, { processTelegramJob, resumeTelegramJobs });
+}
+
+async function processWrite(
+  job: TelegramInboundJob,
+  updateId: number,
+  deps: TelegramChannelDependencies,
+  bot: Telegraf,
+): Promise<void> {
+  const body = writeBody(job.text);
+  if (!body || Array.from(body).length > maxWriteCharacters) {
+    await bot.telegram.sendMessage(
+      job.chatId,
+      localized(
+        job,
+        "Usage: /write followed by 1–4,000 characters. Nothing was saved.",
+        "Cách dùng: /write kèm 1–4.000 ký tự. Chưa có nội dung nào được lưu.",
+      ),
+    );
+    return;
+  }
+  const userId = await deps.store.telegramUserId(job.telegramId);
+  if (!userId) {
+    await bot.telegram.sendMessage(
+      job.chatId,
+      localized(
+        job,
+        "Connect your WalPen account first: send /start for a one-time link code.",
+        "Hãy liên kết tài khoản WalPen trước: gửi /start để nhận mã dùng một lần.",
+      ),
+    );
+    return;
+  }
+
+  let saved: Awaited<ReturnType<Repository["insertTelegramEntry"]>>;
+  try {
+    saved = await deps.store.insertTelegramEntry(
+      updateId,
+      writeEntry(userId, body),
+    );
+  } catch {
+    try {
+      await deps.store.releaseTelegramUpdate(
+        updateId,
+        Date.now() + retryDelayMs,
+        "telegram_entry_persistence_failed",
+      );
+    } catch {
+      // The processing lease remains recoverable if Neon is unavailable.
+    }
+    try {
+      await bot.telegram.sendMessage(
+        job.chatId,
+        localized(
+          job,
+          "WalPen couldn’t save this note yet. It is not marked as saved; please try again shortly.",
+          "WalPen chưa thể lưu ghi chú này. Ghi chú chưa được xác nhận đã lưu; vui lòng thử lại sau.",
+        ),
+      );
+    } catch {
+      // The queued update remains recoverable and will retry after its backoff.
+    }
+    return;
+  }
+
+  const acknowledgement = deps.memory.configured
+    ? localized(
+        job,
+        "Your note is encrypted and queued for Walrus Memory.",
+        "Ghi chú đã được mã hóa và xếp hàng để lưu lên Walrus Memory.",
+      )
+    : localized(
+        job,
+        "Your note is encrypted in WalPen, but Walrus Memory is not configured yet.",
+        "Ghi chú đã được mã hóa trong WalPen, nhưng Walrus Memory chưa được cấu hình.",
+      );
+  await bot.telegram.sendMessage(job.chatId, acknowledgement);
+  await synchronize(
+    deps.store,
+    deps.memory,
+    saved.entry,
+    deps.retryWindowMs,
+  );
 }
 
 async function startMessage(

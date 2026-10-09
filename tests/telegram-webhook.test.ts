@@ -8,6 +8,7 @@ import type { ChatModel } from "../server/llm.ts";
 import type { MemoryGateway } from "../server/memory.ts";
 import type { Repository } from "../server/repository.ts";
 import { hash, Store } from "../server/store.ts";
+import { serializeMemory } from "../server/write-intent.ts";
 
 const config = {
   botToken: "123456789:telegram-test-token",
@@ -56,16 +57,68 @@ function fixture(
   options: {
     store?: Repository;
     background?: (work: Promise<unknown>) => void;
+    memory?: MemoryGateway;
   } = {},
 ) {
   const store = options.store ?? new Store(":memory:", randomBytes(32));
   const jobs: Promise<unknown>[] = [];
-  const { app } = createApp(store, memory, model, {
+  const { app } = createApp(store, options.memory ?? memory, model, {
     rateLimits: false,
     telegram: config,
     background: options.background ?? ((work) => jobs.push(work)),
   });
   return { app, store, jobs };
+}
+function linkedStore(store: Store, telegramId = "123456789") {
+  const now = Date.now();
+  const user = {
+    id: "telegram-owner",
+    username: "telegram-owner",
+    password: "test-password",
+    createdAt: new Date(now).toISOString(),
+  };
+  store.addUser(user);
+  store.issueTelegramLinkCode({
+    telegramId,
+    codeHash: "telegram-link-code-digest",
+    createdAt: now,
+    expiresAt: now + 600_000,
+  });
+  assert.equal(
+    store.consumeTelegramLinkCode(
+      "telegram-link-code-digest",
+      user.id,
+      now,
+    ),
+    "linked",
+  );
+  return user;
+}
+function writeMemory(options: {
+  writes?: string[];
+  remember?: () => Promise<string>;
+} = {}): MemoryGateway {
+  return {
+    configured: true,
+    prepare(entry) {
+      return {
+        accountId: "test-account",
+        serverUrl: "https://memory.example",
+        namespace: `walpen-v1-${entry.userId}`,
+        text: serializeMemory(entry),
+      };
+    },
+    async remember(entry) {
+      options.writes?.push(entry.id);
+      return options.remember?.() ?? `job-${entry.id}`;
+    },
+    async wait(_userId, jobId) {
+      return `blob-${jobId}`;
+    },
+    async recall() {
+      return { results: [] };
+    },
+  };
 }
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function withSendMessage(
@@ -320,6 +373,175 @@ test("start greets an already linked Telegram identity without issuing another c
   } finally {
     restore();
     (f.store as Store).db.close();
+  }
+});
+
+test("write stores an encrypted approved Entry and returns queued status", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  const user = linkedStore(store);
+  const writes: string[] = [];
+  const f = fixture({ store, memory: writeMemory({ writes }) });
+  let release!: () => void;
+  let rememberStarted!: () => void;
+  const delayed = new Promise<string>((resolve) => {
+    release = () => resolve("job-telegram-entry");
+  });
+  const started = new Promise<void>((resolve) => {
+    rememberStarted = resolve;
+  });
+  const delayedMemory = writeMemory({
+    writes,
+    remember: async () => {
+      rememberStarted();
+      return delayed;
+    },
+  });
+  const app = createApp(store, delayedMemory, model, {
+    rateLimits: false,
+    telegram: config,
+    background: (work) => f.jobs.push(work),
+  }).app;
+  let sent: string[] = [];
+  const restore = withSendMessage(async (_chatId, text) => {
+    sent.push(text);
+    return {};
+  });
+  const plainText = "A private thought from Telegram 🪷";
+  try {
+    const response = await request(app)
+      .post("/api/telegram-webhook")
+      .set("X-Telegram-Bot-Api-Secret-Token", config.webhookSecret)
+      .send(update(109, `/write ${plainText}`))
+      .expect(200);
+    await Promise.race([
+      started,
+      delay(1_000).then(() => {
+        throw new Error(
+          `Walrus sync did not start in the worker; replies=${sent.join(" | ")}; entries=${store.list(user.id).length}`,
+        );
+      }),
+    ]);
+    assert.equal(response.text, "");
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /queued|in.*queue/i);
+    const entryRows = store.db
+      .prepare("SELECT * FROM entries WHERE userId=?")
+      .all(user.id) as any[];
+    assert.equal(entryRows.length, 1);
+    const entry = store.get(entryRows[0].id, user.id)!;
+    assert.equal(entry.title, "Telegram journal");
+    assert.equal(entry.body, plainText);
+    assert.equal(entry.memory, plainText);
+    assert.equal(entry.consent, true);
+    assert.equal(entry.status, "submitting");
+    assert.equal(entry.rootId, entry.id);
+    assert.equal(entry.revision, 1);
+    assert.ok(!entryRows[0].payload.includes(plainText));
+    assert.ok(writes.includes(entry.id));
+    assert.equal((await store.writeIntent(entry.id))?.intent.key.length, 36);
+    release();
+    await Promise.all(f.jobs);
+    assert.equal(store.get(entry.id, user.id)?.blobId, "blob-job-telegram-entry");
+  } finally {
+    release();
+    restore();
+    store.db.close();
+  }
+});
+
+test("write update replay does not add another Entry or MemWal submission", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  const user = linkedStore(store);
+  const writes: string[] = [];
+  const f = fixture({ store, memory: writeMemory({ writes }) });
+  const restore = withSendMessage(async () => ({}));
+  try {
+    const send = () =>
+      request(f.app)
+        .post("/api/telegram-webhook")
+        .set("X-Telegram-Bot-Api-Secret-Token", config.webhookSecret)
+        .send(update(110, "/write A repeatable Telegram note"))
+        .expect(200);
+    await send();
+    await Promise.all(f.jobs);
+    await send();
+    await Promise.all(f.jobs);
+    assert.equal(store.list(user.id).length, 1);
+    assert.equal(writes.length, 1);
+  } finally {
+    restore();
+    store.db.close();
+  }
+});
+
+test("write rejects empty and oversized text", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  linkedStore(store);
+  const f = fixture({ store, memory: writeMemory() });
+  const replies: string[] = [];
+  const restore = withSendMessage(async (_chatId, text) => {
+    replies.push(text);
+    return {};
+  });
+  try {
+    await request(f.app)
+      .post("/api/telegram-webhook")
+      .set("X-Telegram-Bot-Api-Secret-Token", config.webhookSecret)
+      .send(update(111, "/write"))
+      .expect(200);
+    await Promise.all(f.jobs);
+    const oversized = await request(f.app)
+      .post("/api/telegram-webhook")
+      .set("X-Telegram-Bot-Api-Secret-Token", config.webhookSecret)
+      .send(update(112, `/write ${"🌿".repeat(4001)}`));
+    assert.equal(oversized.status, 200, oversized.text);
+    await Promise.all(f.jobs);
+    assert.equal(store.list("telegram-owner").length, 0);
+    assert.equal(replies.length, 2);
+    assert.ok(replies.every((reply) => /4,000|4\.000|too long|empty|nội dung/i.test(reply)));
+  } finally {
+    restore();
+    store.db.close();
+  }
+});
+
+test("write reports a persistence failure without claiming the entry was saved", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  linkedStore(store);
+  const failing = new Proxy(store, {
+    get(target, property) {
+      if (property === "insertTelegramEntry")
+        return () => {
+          throw new Error("private content must not be reported");
+        };
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as Repository;
+  const f = fixture({ store: failing, memory: writeMemory() });
+  let reply = "";
+  const restore = withSendMessage(async (_chatId, text) => {
+    reply = text;
+    return {};
+  });
+  try {
+    await request(f.app)
+      .post("/api/telegram-webhook")
+      .set("X-Telegram-Bot-Api-Secret-Token", config.webhookSecret)
+      .send(update(113, "/write A note whose save fails"))
+      .expect(200);
+    await Promise.all(f.jobs);
+    assert.match(reply, /couldn.?t save|not saved|chưa lưu|chưa thể lưu/i);
+    assert.doesNotMatch(reply, /private content must not be reported/);
+    assert.equal(store.list("telegram-owner").length, 0);
+    const queued = store.db
+      .prepare("SELECT state, safe_error_code FROM telegram_updates WHERE update_id=113")
+      .get() as { state: string; safe_error_code: string };
+    assert.equal(queued.state, "queued");
+    assert.equal(queued.safe_error_code, "telegram_entry_persistence_failed");
+  } finally {
+    restore();
+    store.db.close();
   }
 });
 
