@@ -5,9 +5,14 @@ import { PostgresStore } from "../server/postgres-store.ts";
 import { createApp } from "../server/app.ts";
 import { WalrusMemory } from "../server/memory.ts";
 import { LocalModel } from "../server/llm.ts";
+import { telegramConfigFromEnv } from "../server/channels/telegram.ts";
 
 let runtime:
-  | { store: PostgresStore; app: ReturnType<typeof createApp>["app"] }
+  | {
+      store: PostgresStore;
+      app: ReturnType<typeof createApp>["app"];
+      resumeTelegramJobs: ReturnType<typeof createApp>["resumeTelegramJobs"];
+    }
   | undefined;
 function getRuntime() {
   if (runtime) return runtime;
@@ -35,14 +40,20 @@ function getRuntime() {
     pool,
     Buffer.from(DATA_ENCRYPTION_KEY, "hex"),
   );
-  const { app } = createApp(store, new WalrusMemory(), new LocalModel(), {
-    production: true,
-    origin: APP_ORIGIN,
-    inviteCode: INVITE_CODE,
-    trustProxy: 1,
-    background: waitUntil,
-  });
-  return (runtime = { store, app });
+  const { app, resumeTelegramJobs } = createApp(
+    store,
+    new WalrusMemory(),
+    new LocalModel(),
+    {
+      production: true,
+      origin: APP_ORIGIN,
+      inviteCode: INVITE_CODE,
+      trustProxy: 1,
+      background: waitUntil,
+      telegram: telegramConfigFromEnv(process.env),
+    },
+  );
+  return (runtime = { store, app, resumeTelegramJobs });
 }
 
 export default async function handler(
@@ -50,8 +61,13 @@ export default async function handler(
   res: ServerResponse,
 ) {
   try {
-    const { store, app } = getRuntime();
+    const { store, app, resumeTelegramJobs } = getRuntime();
     await store.init();
+    waitUntil(
+      resumeTelegramJobs(10).catch(() =>
+        console.warn("Telegram recovery deferred."),
+      ),
+    );
     app(req, res);
   } catch {
     res.statusCode = 503;

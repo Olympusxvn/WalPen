@@ -178,6 +178,17 @@ export const english: Record<string, string> = {
     "WalPen is inspired by Pause & Pen. No streaks. No scores. You write; AI keeps you company.",
   "Nhật ký": "Journal",
   "Trò chuyện": "Talk",
+  "Trò chuyện qua Telegram": "Chat via Telegram",
+  "Telegram xử lý tin nhắn đã gửi. Nhà cung cấp AI đã cấu hình xử lý hội thoại.":
+    "Telegram handles sent messages. The configured AI provider handles chat.",
+  "Mã liên kết": "Link code",
+  "Liên kết tài khoản": "Link account",
+  "Hãy nhập mã liên kết.": "Enter a link code.",
+  "Mã liên kết quá dài.": "That link code is too long.",
+  "Mã liên kết không hợp lệ hoặc đã hết hạn.":
+    "Link code is invalid or expired.",
+  "Đã liên kết tài khoản Telegram.": "Telegram account linked.",
+  "Đã liên kết Telegram.": "Telegram is linked.",
   "Ký ức": "Memories",
   "Viết nhật ký": "Write a page",
   Viết: "Write",

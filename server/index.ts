@@ -6,6 +6,7 @@ import { Store } from "./store.ts";
 import { WalrusMemory } from "./memory.ts";
 import { LocalModel } from "./llm.ts";
 import { createApp } from "./app.ts";
+import { telegramConfigFromEnv } from "./channels/telegram.ts";
 const secret = process.env.DATA_ENCRYPTION_KEY;
 if (!secret || !/^[a-f\d]{64}$/i.test(secret))
   throw new Error(
@@ -23,20 +24,26 @@ const store = new Store(
   process.env.DATABASE_PATH || "data/walpen.sqlite",
   Buffer.from(secret, "hex"),
 );
-const { app, resume } = createApp(store, new WalrusMemory(), new LocalModel(), {
-  production,
-  origin: process.env.APP_ORIGIN,
-  inviteCode: process.env.INVITE_CODE,
-});
+const { app, resume, resumeTelegramJobs } = createApp(
+  store,
+  new WalrusMemory(),
+  new LocalModel(),
+  {
+    production,
+    origin: process.env.APP_ORIGIN,
+    inviteCode: process.env.INVITE_CODE,
+    telegram: telegramConfigFromEnv(),
+  },
+);
 if (existsSync("dist/index.html")) {
   app.use(express.static(resolve("dist")));
   app.get("/{*path}", (_req, res) => res.sendFile(resolve("dist/index.html")));
 }
 const port = Number(process.env.PORT) || 3001;
 function resumeSafely() {
-  void resume().catch(() =>
+  void Promise.all([resume(), resumeTelegramJobs(10)]).catch(() =>
     console.error(
-      "Background synchronization could not finish; durable state retained.",
+      "Background recovery could not finish; durable state retained.",
     ),
   );
 }

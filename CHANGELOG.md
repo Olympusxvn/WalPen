@@ -2,6 +2,12 @@
 
 Notable changes to WalPen are recorded here. Dates use `YYYY-MM-DD`.
 
+## 2026-10-09 — MemWal latency audit and hybrid cache rationale
+
+### Added
+
+- Recorded three MemWal infrastructure latency tickets ([WalPen #3](ISSUE.md), [WalPen #4](ISSUE.md), [WalPen #5](ISSUE.md)) in the root `ISSUE.md`. They document why WalPen keeps an encrypted Neon (production) / SQLite (local) application cache: so Telegram and web channels can acknowledge work quickly and fall back when remote `recall()` is slow or unavailable, without treating that cache as the source of record for Walrus memories.
+
 ## 2026-10-03 — Durable per-revision MemWal writes
 
 - Addressed [WalPen #2](https://github.com/Olympusxvn/WalPen/issues/2): commit an opaque idempotency key and encrypted frozen request in Neon/SQLite before sending. Retries retain the same key, account, namespace and exact text; new revisions receive distinct keys.

@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Store, type Entry } from "../server/store.ts";
+import { hash, Store, type Entry } from "../server/store.ts";
 import { createApp } from "../server/app.ts";
 import type { MemoryGateway, MemoryRecall } from "../server/memory.ts";
 import type { Source } from "../server/llm.ts";
@@ -473,3 +473,146 @@ for (const operation of ["forget", "edit"] as const) {
     s.store.db.close();
   });
 }
+
+test("telegram status is scoped to the signed-in WalPen user", async () => {
+  const s = setup();
+  const alice = request.agent(s.app);
+  const bob = request.agent(s.app);
+  await alice.post("/api/register").send(account("telegram_alice")).expect(201);
+  await bob.post("/api/register").send(account("telegram_bob")).expect(201);
+  await request(s.app).get("/api/telegram/status").expect(401);
+
+  const now = Date.now();
+  const code = "ALICE-TELEGRAM-1001";
+  assert.equal(
+    s.store.issueTelegramLinkCode({
+      telegramId: "700001",
+      codeHash: hash(code),
+      createdAt: now,
+      expiresAt: now + 600_000,
+    }),
+    true,
+  );
+  await alice
+    .post("/api/telegram/link")
+    .send({ code: " " + code.toLowerCase() + " " })
+    .expect(200);
+  const own = await alice.get("/api/telegram/status").expect(200);
+  assert.equal(own.body.linked, true);
+  assert.equal(own.body.telegramId, "700001");
+  assert.ok(Date.parse(own.body.linkedAt) >= now);
+  assert.deepEqual((await bob.get("/api/telegram/status").expect(200)).body, {
+    linked: false,
+  });
+  s.store.db.close();
+});
+
+test("telegram linking consumes a valid code and rejects reuse", async () => {
+  const s = setup();
+  const alice = request.agent(s.app);
+  await alice.post("/api/register").send(account("telegram_reuse")).expect(201);
+  const now = Date.now();
+  const code = "ONE-TIME-CODE-22";
+  s.store.issueTelegramLinkCode({
+    telegramId: "700002",
+    codeHash: hash(code),
+    createdAt: now,
+    expiresAt: now + 600_000,
+  });
+
+  await alice
+    .post("/api/telegram/link")
+    .send({ code })
+    .expect(200, { linked: true });
+  const replay = await alice
+    .post("/api/telegram/link")
+    .send({ code })
+    .expect(400);
+  assert.deepEqual(replay.body, { error: "Link code is invalid or expired." });
+  assert.equal(
+    s.store.telegramUserId("700002"),
+    (await alice.get("/api/session")).body.user.id,
+  );
+  s.store.db.close();
+});
+
+test("expired and cross-account codes never link", async () => {
+  const s = setup();
+  const alice = request.agent(s.app);
+  const bob = request.agent(s.app);
+  const aliceResponse = await alice
+    .post("/api/register")
+    .send(account("telegram_owner"))
+    .expect(201);
+  await bob.post("/api/register").send(account("telegram_other")).expect(201);
+
+  const now = Date.now();
+  const expired = "EXPIRED-CODE-44";
+  s.store.issueTelegramLinkCode({
+    telegramId: "700003",
+    codeHash: hash(expired),
+    createdAt: now - 1_200_000,
+    expiresAt: now - 600_000,
+  });
+  const expiredResponse = await alice
+    .post("/api/telegram/link")
+    .send({ code: expired })
+    .expect(400);
+  assert.deepEqual(expiredResponse.body, {
+    error: "Link code is invalid or expired.",
+  });
+  assert.equal(s.store.telegramUserId("700003"), undefined);
+
+  const code = "BOUND-TELEGRAM-55";
+  s.store.issueTelegramLinkCode({
+    telegramId: "700004",
+    codeHash: hash(code),
+    createdAt: now,
+    expiresAt: now + 600_000,
+  });
+  await alice.post("/api/telegram/link").send({ code }).expect(200);
+  const linkedAgain = "SECOND-CODE-66";
+  s.store.issueTelegramLinkCode({
+    telegramId: "700004",
+    codeHash: hash(linkedAgain),
+    createdAt: now + 1,
+    expiresAt: now + 600_001,
+  });
+  const otherAccount = await bob
+    .post("/api/telegram/link")
+    .send({ code: linkedAgain })
+    .expect(400);
+  assert.deepEqual(otherAccount.body, {
+    error: "Link code is invalid or expired.",
+  });
+  assert.equal(s.store.telegramUserId("700004"), aliceResponse.body.user.id);
+  assert.deepEqual((await bob.get("/api/telegram/status").expect(200)).body, {
+    linked: false,
+  });
+  s.store.db.close();
+});
+
+test("telegram linking is rate limited", async () => {
+  const store = new Store(":memory:", randomBytes(32));
+  const memory = new FakeMemory();
+  const model = {
+    configured: true,
+    name: "test-only",
+    async answer() {
+      return "unused";
+    },
+  };
+  const app = createApp(store, memory, model).app;
+  const alice = request.agent(app);
+  await alice
+    .post("/api/register")
+    .send(account("telegram_limited"))
+    .expect(201);
+  for (let index = 0; index < 5; index++)
+    await alice
+      .post("/api/telegram/link")
+      .send({ code: "INVALID" })
+      .expect(400);
+  await alice.post("/api/telegram/link").send({ code: "INVALID" }).expect(429);
+  store.db.close();
+});

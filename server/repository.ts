@@ -16,6 +16,19 @@ export type WalletChallenge = {
   expires: number;
   userId: string | null;
 };
+export type TelegramLinkStatus = {
+  telegramId: string;
+  linkedAt: string;
+};
+export type TelegramLinkResult = "linked" | "invalid" | "expired" | "conflict";
+export type TelegramInboundJob = {
+  updateId: number;
+  telegramId: string;
+  chatId: string;
+  text: string;
+  language: "en" | "vi";
+};
+export const TELEGRAM_MAX_ATTEMPTS = 5;
 export interface Repository {
   addWalletChallenge(challenge: WalletChallenge): Result<void>;
   getWalletChallenge(
@@ -38,6 +51,47 @@ export interface Repository {
   deleteSession(token: string): Result<void>;
   userByName(username: string): Result<UserRecord | undefined>;
   addUser(user: UserRecord): Result<void>;
+  issueTelegramLinkCode(input: {
+    telegramId: string;
+    codeHash: string;
+    createdAt: number;
+    expiresAt: number;
+  }): Result<boolean>;
+  telegramUserId(telegramId: string): Result<string | undefined>;
+  telegramLinkForUser(userId: string): Result<TelegramLinkStatus | undefined>;
+  consumeTelegramLinkCode(
+    codeHash: string,
+    userId: string,
+    now: number,
+  ): Result<TelegramLinkResult>;
+  enqueueTelegramUpdate(
+    input: TelegramInboundJob,
+    now: number,
+  ): Result<{
+    created: boolean;
+    state: "queued" | "processing" | "done" | "failed" | "uncertain";
+  }>;
+  pendingTelegramUpdateIds(now: number, limit: number): Result<number[]>;
+  claimTelegramUpdate(
+    updateId: number,
+    now: number,
+    leaseUntil: number,
+  ): Result<TelegramInboundJob | undefined>;
+  finishTelegramUpdate(
+    updateId: number,
+    status: "done" | "failed" | "uncertain",
+    now: number,
+    safeErrorCode?: string,
+  ): Result<void>;
+  releaseTelegramUpdate(
+    updateId: number,
+    nextAttemptAt: number,
+    safeErrorCode: string,
+  ): Result<void>;
+  insertTelegramEntry(
+    updateId: number,
+    entry: Entry,
+  ): Result<{ entry: Entry; created: boolean }>;
   get(id: string, userId: string): Result<Entry | undefined>;
   list(userId: string, all?: boolean): Result<Entry[]>;
   pending(userId?: string, windowMs?: number, now?: number): Result<Entry[]>;

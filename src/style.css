@@ -712,6 +712,12 @@ main {
 .companion-card .text-button {
   font-size: 10px;
 }
+.companion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+}
 .privacy-note {
   display: flex;
   align-items: flex-start;
@@ -1788,14 +1794,46 @@ main {
   color: #b3bda7;
   font-size: 9px;
 }
+.topbar > .telegram-link {
+  margin-left: 14px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.telegram-link:hover {
+  color: #375f3b;
+}
+.telegram-link:focus-visible {
+  outline: 2px solid #6d927a;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
 .top-note {
   margin-left: auto;
   margin-right: 20px;
 }
 @media (max-width: 650px) {
+  .topbar {
+    height: auto;
+    min-height: 65px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
   .topbar > .language-switch {
     margin-left: auto;
     margin-right: 12px;
+  }
+  .topbar > .telegram-link {
+    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 38%;
+    margin-left: 8px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+    font-size: 9px;
+    text-align: end;
   }
   .language-switch button {
     min-height: 30px;
@@ -1813,18 +1851,21 @@ main {
   }
 }
 /* Personal AI credentials use the same form treatment as account settings. */
-.ai-settings-form {
+.ai-settings-form,
+.telegram-link-form {
   display: grid;
   gap: 14px;
   margin: 18px 0;
 }
-.ai-settings-form label {
+.ai-settings-form label,
+.telegram-link-form label {
   display: grid;
   gap: 7px;
   font-size: 14px;
 }
 .ai-settings-form input,
-.ai-settings-form select {
+.ai-settings-form select,
+.telegram-link-form input {
   width: 100%;
   padding: 11px 13px;
   border: 1px solid #d6dace;
