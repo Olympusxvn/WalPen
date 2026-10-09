@@ -21,7 +21,7 @@ English · Tiếng Việt · Sui wallet sign-in · Walrus Memory · Cloud AI / l
 
 ![WalPen: a journal, an approved memory card and a conversation recalling the same park scene.](docs/assets/walpen-article-cover.png)
 
-*Concept illustration, not an application screenshot.*
+*The time feels slow because of more memories*
 
 > Write a page → approve a memory excerpt → return to a fresh conversation.
 
